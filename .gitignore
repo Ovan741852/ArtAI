@@ -1,0 +1,6 @@
+/server/package-lock.json
+/server/dist
+/server/node_modules
+/web/package-lock.json
+/web/dist
+/web/node_modules
