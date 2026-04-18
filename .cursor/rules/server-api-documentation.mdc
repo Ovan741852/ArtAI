@@ -1,0 +1,15 @@
+---
+description: Keep server HTTP API reference in sync when routes change
+globs: server/src/routes/**/*.ts,server/src/app/**/*.ts
+alwaysApply: false
+---
+
+# Server API documentation
+
+Whenever you **add, remove, or materially change** a public HTTP endpoint (method, path, request/response shape, env vars that gate the route):
+
+1. Update [`server/docs/API.md`](../../server/docs/API.md) in the **same change** as the code.
+2. Add or adjust the table row: method, path, purpose (match the tone and language of the existing doc — Traditional Chinese for user-facing descriptions in this file).
+3. If the change affects global behavior (port, CORS, new env vars), update the **相關環境變數** or intro sections as needed.
+
+Do not leave `API.md` out of date after route work in `server/src/routes/` or registration in `server/src/app/`.

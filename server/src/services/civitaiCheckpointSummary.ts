@@ -1,7 +1,7 @@
 import { stripHtml } from '../lib/stripHtml.js'
 import type { ServerEnv } from '../config/env.js'
-import { searchCheckpointModels } from './civitaiSearchModels.js'
-import { pickCheckpointFromCivitaiItems, stemFileName } from './civitaiPickCheckpoint.js'
+import { searchCheckpointModels, type CivitaiModelItem, type CivitaiModelVersion } from './civitaiSearchModels.js'
+import { pickCheckpointFromCivitaiItems, stemFileName, type CheckpointPickQuality } from './civitaiPickCheckpoint.js'
 import { ollamaGenerateNonStream } from './ollamaGenerate.js'
 
 export class AppHttpError extends Error {
@@ -59,16 +59,27 @@ function buildCivitaiSearchQueriesFromStem(stem: string): string[] {
   ])
 }
 
-export async function runCheckpointSummary(env: ServerEnv, input: CheckpointSummaryBody) {
-  const checkpoint = input.checkpoint?.trim()
-  if (!checkpoint) throw new AppHttpError(400, 'Body field "checkpoint" is required (e.g. "realisticVisionV51_v51VAE.safetensors")')
+export type CivitaiCheckpointResolveResult = {
+  checkpoint: string
+  civitaiSearchQuery: string
+  civitaiSearchQueriesTried: string[]
+  matchQuality: CheckpointPickQuality
+  civitaiSearchHitCount: number
+  item: CivitaiModelItem
+  version: CivitaiModelVersion
+}
 
-  const ollamaModel = input.ollamaModel?.trim() || env.ollamaSummaryModel
-  if (!ollamaModel) {
-    throw new AppHttpError(
-      400,
-      'Ollama model is required: pass "ollamaModel" in JSON or set env OLLAMA_SUMMARY_MODEL',
-    )
+/**
+ * 依本機 checkpoint 檔名在 Civitai（types=Checkpoint）搜尋並挑出最可能的一筆 model + version。
+ * 供 Ollama 摘要與「本機目錄同步」等流程重用。
+ */
+export async function findCivitaiForLocalCheckpoint(
+  env: ServerEnv,
+  input: Pick<CheckpointSummaryBody, 'checkpoint' | 'searchQuery'>,
+): Promise<CivitaiCheckpointResolveResult> {
+  const checkpoint = input.checkpoint?.trim()
+  if (!checkpoint) {
+    throw new AppHttpError(400, 'Body field "checkpoint" is required (e.g. "realisticVisionV51_v51VAE.safetensors")')
   }
 
   const qStem = stemFileName(checkpoint)
@@ -110,6 +121,28 @@ export async function runCheckpointSummary(env: ServerEnv, input: CheckpointSumm
   }
 
   const { item, version, quality } = picked
+  return {
+    checkpoint,
+    civitaiSearchQuery: civitaiSearchQueryUsed,
+    civitaiSearchQueriesTried: searchQueries,
+    matchQuality: quality,
+    civitaiSearchHitCount: items.length,
+    item,
+    version,
+  }
+}
+
+export async function runCheckpointSummary(env: ServerEnv, input: CheckpointSummaryBody) {
+  const ollamaModel = input.ollamaModel?.trim() || env.ollamaSummaryModel
+  if (!ollamaModel) {
+    throw new AppHttpError(
+      400,
+      'Ollama model is required: pass "ollamaModel" in JSON or set env OLLAMA_SUMMARY_MODEL',
+    )
+  }
+
+  const { checkpoint, civitaiSearchQuery, civitaiSearchQueriesTried, matchQuality, civitaiSearchHitCount, item, version } =
+    await findCivitaiForLocalCheckpoint(env, input)
 
   const modelDescription = stripHtml(item.description ?? '')
   const versionDescription = stripHtml(version.description ?? '')
@@ -145,10 +178,10 @@ export async function runCheckpointSummary(env: ServerEnv, input: CheckpointSumm
 
   return {
     checkpoint,
-    civitaiSearchQuery: civitaiSearchQueryUsed,
-    civitaiSearchQueriesTried: searchQueries,
-    matchQuality: quality,
-    civitaiSearchHitCount: items.length,
+    civitaiSearchQuery,
+    civitaiSearchQueriesTried,
+    matchQuality,
+    civitaiSearchHitCount,
     ...civitaiForLlm,
     civitaiHtml: {
       modelDescription: item.description ?? null,
