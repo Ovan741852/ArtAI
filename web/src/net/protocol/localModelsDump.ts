@@ -33,6 +33,11 @@ export type LocalModelsDumpData = {
         civitaiSearchQuery: string
         syncedAt: string
         civitaiModelName: string | null
+        civitaiTags: string[]
+        civitaiDescriptionPreview: string
+        civitaiTrainedWords: string[]
+        civitaiBaseModel: string | null
+        civitaiCreatorUsername: string | null
       }>
     }
   }

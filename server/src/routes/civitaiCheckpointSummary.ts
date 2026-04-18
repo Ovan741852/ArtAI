@@ -6,7 +6,7 @@ export function createCivitaiCheckpointSummaryRoutes(env: ServerEnv) {
   const r = new Hono()
 
   /**
-   * 依本機 checkpoint 檔名查 Civitai → 擷取 description / trainedWords / baseModel → 交本地 Ollama 產生繁中用法摘要。
+   * 依本機 checkpoint 檔名查 Civitai → 擷取 description / trainedWords / baseModel → 交本地 Ollama 產生**英文**用法摘要。
    * Body: `{ "checkpoint": "foo.safetensors", "ollamaModel"?: "llama3.2:latest" }`
    */
   r.post('/civitai/checkpoint/summary', async (c) => {

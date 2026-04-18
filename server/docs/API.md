@@ -38,7 +38,7 @@
 
 | 方法 | 路徑 | 用途 |
 |------|------|------|
-| `POST` | `/civitai/checkpoint/summary` | 依**單一**本機 checkpoint 檔名搜尋 Civitai、擷取描述與版本資訊後，交給本機 **Ollama** 產生繁中用法摘要。Body：`{ "checkpoint": "foo.safetensors", "ollamaModel"?: "…", "searchQuery"?: "…" }`。 |
+| `POST` | `/civitai/checkpoint/summary` | 依**單一**本機 checkpoint 檔名搜尋 Civitai、擷取描述與版本資訊後，交給本機 **Ollama** 產生**英文**用法摘要。Body：`{ "checkpoint": "foo.safetensors", "ollamaModel"?: "…", "searchQuery"?: "…" }`。 |
 | `POST` | `/civitai/models/suggest-from-descriptions` | 依多則畫面描述交 **Ollama** 推斷 Civitai 用 `tag`／`query` 搜尋用的字串，再以官方 `GET /api/v1/models` 依 **Most Downloaded + AllTime** 合併去重，回傳最熱門的模型列表（預設 5 筆）。Body：`{ "descriptions": "…" \| string[], "ollamaModel"?: "…", "types"?: "Checkpoint", "nsfw"?: boolean, "perSearchLimit"?: number, "limit"?: number }`。 |
 | `GET` | `/civitai/models/search` | 關鍵字搜尋 Civitai `GET /api/v1/models`。必填其一：`query` 或 `tag`。可選：`types`、`sort`、`period`、`baseModels`、`limit`、`nsfw`；`summarize=1` 時會用 Ollama 總結前幾筆。 |
 | `GET` | `/civitai/models/:id` | 依數字模型 ID 取得 Civitai `GET /api/v1/models/{id}`，回傳精簡後的 `model` 物件（description 去 HTML、含版本預覽等）。 |
@@ -61,7 +61,7 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 
 | 方法 | 路徑 | 用途 |
 |------|------|------|
-| `GET` | `/models/local/dump` | 回傳 `sources`（comfyui / ollama / checkpointCatalog）、`summary` 計數、**`refreshedAt`**、**`fromCache`**、**`staleAt`**（快取預計過期之 UTC 時間，TTL 為 0 時為 null）。Query：`force=1` 時略過快取並重新抓取 ComfyUI 與 Ollama。 |
+| `GET` | `/models/local/dump` | 回傳 `sources`（comfyui / ollama / checkpointCatalog）、`summary` 計數、**`refreshedAt`**、**`fromCache`**、**`staleAt`**（快取預計過期之 UTC 時間，TTL 為 0 時為 null）。Query：`force=1` 時略過快取並重新抓取 ComfyUI 與 Ollama。`checkpointCatalog.entries[]` 每筆含 **`civitaiTags`**、**`civitaiDescriptionPreview`**（Civitai 模型描述去 HTML 後之前綴，約 12k 字元內；多為英文）、**`civitaiTrainedWords`**、**`civitaiBaseModel`**、**`civitaiCreatorUsername`**（皆來自已同步之目錄 JSON 內 `model`）。 |
 
 ---
 

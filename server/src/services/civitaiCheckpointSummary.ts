@@ -160,12 +160,13 @@ export async function runCheckpointSummary(env: ServerEnv, input: CheckpointSumm
   }
 
   const prompt = [
-    '你是熟悉 Stable Diffusion、ComfyUI 與 Civitai 生态的助手。',
-    '以下 JSON 来自 Civitai 官方 API（創作者撰寫的描述、版本說明、觸發詞與底模欄位）。請用繁體中文簡潔總結：',
-    '- 這個模型適合的風格、主題與常見用途',
-    '- trainedWords（若有）建議如何使用；不要編造未出現在 JSON 裡的觸發詞',
-    '- baseModel 對使用者選底模、相容性的意義',
-    '請勿臆測 JSON 沒有的資訊；若資料不足請直接說明。',
+    'You are an assistant familiar with Stable Diffusion, ComfyUI, and Civitai.',
+    'The JSON below is from the official Civitai API (creator descriptions, version notes, trained words, base model).',
+    'Write a concise summary in **English** only:',
+    '- Typical style, subjects, and use cases for this checkpoint',
+    '- If trainedWords exist, how to use them; do not invent triggers not present in the JSON',
+    '- What baseModel implies for compatibility',
+    'Do not guess beyond the JSON; say clearly if data is insufficient.',
     '',
     JSON.stringify(civitaiForLlm, null, 2),
   ].join('\n')

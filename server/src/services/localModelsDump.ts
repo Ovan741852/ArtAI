@@ -1,7 +1,19 @@
 import type { ServerEnv } from '../config/env.js'
+import type { CivitaiModelRow } from './civitaiModelRowMap.js'
 import { fetchCheckpointList } from './comfyuiCheckpoints.js'
 import { fetchOllamaTags, type OllamaTagModel } from './ollamaTags.js'
 import { readOwnedCheckpointsCatalog, resolveOwnedCheckpointsStorePath } from './ownedCheckpointsStore.js'
+
+function truncateText(s: string, max: number): string {
+  const t = s.replace(/\s+/g, ' ').trim()
+  if (t.length <= max) return t
+  return `${t.slice(0, max)}…`
+}
+
+function pickVersionPreview(model: CivitaiModelRow, versionId: number) {
+  const hit = model.modelVersionsPreview.find((v) => v.id === versionId)
+  return hit ?? model.modelVersionsPreview[0]
+}
 
 export type LocalModelsDumpCore = {
   sources: {
@@ -33,6 +45,13 @@ export type LocalModelsDumpCore = {
         civitaiSearchQuery: string
         syncedAt: string
         civitaiModelName: string | null
+        /** Civitai 模型 tags（目錄 JSON 內已存之 `model.tags`）。 */
+        civitaiTags: string[]
+        /** 去 HTML 後的 Civitai 模型描述（多為英文），截斷上限較大供工具／AI 閱讀。 */
+        civitaiDescriptionPreview: string
+        civitaiTrainedWords: string[]
+        civitaiBaseModel: string | null
+        civitaiCreatorUsername: string | null
       }>
     }
   }
@@ -98,15 +117,23 @@ async function buildFreshCore(env: ServerEnv): Promise<LocalModelsDumpCore> {
 
   const [comfyui, ollama] = await Promise.all([comfyP, ollamaP])
 
-  const entries = catalog.entries.map((e) => ({
-    localFilename: e.localFilename,
-    civitaiModelId: e.civitaiModelId,
-    civitaiVersionId: e.civitaiVersionId,
-    matchQuality: e.matchQuality,
-    civitaiSearchQuery: e.civitaiSearchQuery,
-    syncedAt: e.syncedAt,
-    civitaiModelName: e.model?.name ?? null,
-  }))
+  const entries = catalog.entries.map((e) => {
+    const ver = pickVersionPreview(e.model, e.civitaiVersionId)
+    return {
+      localFilename: e.localFilename,
+      civitaiModelId: e.civitaiModelId,
+      civitaiVersionId: e.civitaiVersionId,
+      matchQuality: e.matchQuality,
+      civitaiSearchQuery: e.civitaiSearchQuery,
+      syncedAt: e.syncedAt,
+      civitaiModelName: e.model?.name ?? null,
+      civitaiTags: [...(e.model.tags ?? [])],
+      civitaiDescriptionPreview: truncateText(e.model.descriptionText ?? '', 12_000),
+      civitaiTrainedWords: [...(ver?.trainedWords ?? [])],
+      civitaiBaseModel: ver?.baseModel ?? null,
+      civitaiCreatorUsername: e.model.creatorUsername ?? null,
+    }
+  })
 
   const core: LocalModelsDumpCore = {
     sources: {
