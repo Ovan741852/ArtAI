@@ -21,7 +21,7 @@ export type MattingAutoBody = {
   imageBase64: string
   /** 覆寫讀圖分類用 Ollama 模型（須支援視覺較佳）；省略則用 `OLLAMA_SUMMARY_MODEL`。 */
   ollamaModel?: string
-  /** 強化：`edgeRefine: true` 時第一輪成功後再跑本機 ONNX 第二輪。 */
+  /** 強化：`edgeRefine: true` 時第一輪成功後以原圖在邊界帶混合修飾（見 `mattingEdgeRefineWithOriginal`）。 */
   enhancements?: MattingEnhancements
 }
 
@@ -163,6 +163,7 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
   if (anyMattingEnhancement(enhancements)) {
     try {
       const r = await applyMattingEnhancements({
+        original: decoded,
         round1Png: first.buf,
         enhancements,
       })

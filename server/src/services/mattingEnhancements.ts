@@ -1,9 +1,12 @@
 import type { DecodedMattingImage } from './mattingImageBytes.js'
-import { removeBackgroundWithImgly } from './mattingLocalImgly.js'
+import { refineMattingWithOriginal } from './mattingEdgeRefineWithOriginal.js'
 
 /** 與 `POST /images/matting/auto` body `enhancements` 對齊。 */
 export type MattingEnhancements = {
-  /** 第一輪後再以本機 ONNX 跑一輪（修飾邊緣／半透明邊）。 */
+  /**
+   * 第一輪成功後：以**原圖**與第一輪 PNG 在 alpha 邊界帶內混合 RGB（保留 alpha），修飾邊緣糊／輕微溢色。
+   * 不再呼叫第二輪 WASM 去背。
+   */
   edgeRefine?: boolean
 }
 
@@ -20,24 +23,21 @@ export function anyMattingEnhancement(e: MattingEnhancements | undefined): boole
   return e.edgeRefine === true
 }
 
-function asPngDecoded(buf: Buffer): DecodedMattingImage {
-  return { buffer: buf, mime: 'image/png', filename: 'matting-round1.png' }
-}
-
 /**
- * 在第一輪 PNG 成功後執行強化階段（僅本機 ONNX 第二輪）。
+ * 在第一輪 PNG 成功後執行強化（原圖對齊邊界帶）。
  */
 export async function applyMattingEnhancements(params: {
+  original: DecodedMattingImage
   round1Png: Buffer
   enhancements: MattingEnhancements
 }): Promise<{ buffer: Buffer; appliedStepsZh: string[] }> {
-  const { round1Png, enhancements } = params
+  const { original, round1Png, enhancements } = params
   const appliedStepsZh: string[] = []
   let buf = round1Png
 
   if (enhancements.edgeRefine === true) {
-    buf = await removeBackgroundWithImgly(asPngDecoded(buf))
-    appliedStepsZh.push('邊緣強化（本機 ONNX 第二輪）')
+    buf = await refineMattingWithOriginal(original, round1Png)
+    appliedStepsZh.push('邊緣強化（原圖對齊邊界帶）')
   }
 
   return { buffer: buf, appliedStepsZh }

@@ -145,7 +145,7 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 
 - `imageBase64`（必填）：base64 圖檔；可含 `data:image/png;base64,` 前綴。解碼後上限 **8 MB**。支援常見 **PNG／JPEG／WebP** 魔數。
 - `ollamaModel`（選填）：讀圖分類用模型；須為 Ollama 支援**視覺**者較佳。省略時使用 `OLLAMA_SUMMARY_MODEL`。若視覺呼叫失敗，分類會退回預設並於 `warnings` 附註（仍會繼續摳圖）。
-- `enhancements`（選填）：物件。`edgeRefine: true` 時，第一輪成功後會再以 **本機 ONNX** 對結果圖跑 **第二輪**（邊緣／半透明邊修飾）。省略或 `false` 則僅一輪。
+- `enhancements`（選填）：物件。`edgeRefine: true` 時，第一輪成功後會以 **原圖** 與第一輪 PNG 對齊尺寸，在 **alpha 半透明邊界帶** 內將 RGB 向原圖混合（保留第一輪 alpha），修飾邊緣糊／輕溢色（**Sharp**，不依賴第二輪 WASM 去背）。省略或 `false` 則僅一輪。
 
 **成功 JSON：** `ok: true` 外加：
 

@@ -237,7 +237,7 @@ export function MattingPanelWindow() {
 
       <div className="mat__toggles" aria-label="摳圖強化選項">
         <p className="mat__toggles-title">強化（第二輪）</p>
-        <p className="mat__toggles-hint">勾選後，第一輪成功會再以本機 ONNX 對結果圖多跑一輪（修邊／半透明邊）。</p>
+        <p className="mat__toggles-hint">勾選後，第一輪成功會用原圖在邊界帶與結果混合（修邊／半透明邊），不再跑第二輪 WASM 去背。</p>
         <div className="mat__toggle-row">
           <input
             id="mat-enhance-edge"
@@ -248,7 +248,7 @@ export function MattingPanelWindow() {
           />
           <label className="mat__toggle-label" htmlFor="mat-enhance-edge">
             邊緣強化
-            <span className="mat__toggle-note">第一輪後再以本機 ONNX 修飾邊緣與半透明邊。</span>
+            <span className="mat__toggle-note">第一輪後以原圖對齊、在半透明邊界帶混合 RGB（保留 alpha）。</span>
           </label>
         </div>
       </div>
