@@ -8,6 +8,11 @@ import {
 } from './creativeLoopChat.js'
 import { getLocalModelsDump } from './localModelsDump.js'
 import { ollamaGenerateNonStream } from './ollamaGenerate.js'
+import {
+  CREATIVE_LOOP_RESOURCE_REPLY_FALLBACK_ZH,
+  fallbackReplyFromDiscoveryTags,
+  resolveAssistantReplyZh,
+} from '../lib/assistantLlmUserReply.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { getWorkflowTemplateById } from './workflowTemplatesRegistry.js'
 
@@ -84,11 +89,107 @@ function parseProposedPatch(raw: unknown): Record<string, unknown> {
   return { ...(raw as Record<string, unknown>) }
 }
 
-function readNonEmptyString(x: unknown, field: string): string {
-  if (typeof x !== 'string' || !x.trim()) {
-    throw new AppHttpError(502, `LLM JSON: "${field}" must be a non-empty string`)
+/** 模型偶用別的鍵名；只接受非空陣列。 */
+function coerceLlmItemsArray(o: Record<string, unknown>): unknown[] | null {
+  const tryKeys = ['items', 'checklist', 'resourceItems', 'rows'] as const
+  for (const k of tryKeys) {
+    const v = o[k]
+    if (Array.isArray(v) && v.length > 0) {
+      return v
+    }
   }
-  return x.trim()
+  return null
+}
+
+function buildFallbackChecklist(
+  env: ServerEnv,
+  proposedPatch: Record<string, unknown>,
+  ckptSet: Set<string>,
+  templateWhitelistKeys: string[],
+): CreativeLoopResourceChecklistItem[] {
+  const keys = new Set(templateWhitelistKeys)
+  const out: CreativeLoopResourceChecklistItem[] = []
+  const rawCkpt = proposedPatch.ckpt_name
+  const ckptGuess = typeof rawCkpt === 'string' && rawCkpt.trim() ? rawCkpt.trim().slice(0, 400) : null
+
+  if (keys.has('ckpt_name')) {
+    const fn = ckptGuess
+    const hasLocal = fn != null && ckptSet.has(fn)
+    const stem = fn ? fn.replace(/\.(safetensors|ckpt|pt)$/i, '').replace(/\.[^.]+$/, '') : 'checkpoint'
+    const modelTags = ['checkpoint']
+    const searchQueries = [stem.slice(0, 120)]
+    out.push({
+      id: randomUUID(),
+      kind: 'checkpoint',
+      titleZh: '主要 Checkpoint',
+      filename: fn,
+      modelTags,
+      searchQueries,
+      detailZh: hasLocal
+        ? '本機偵測有此檔名；若上方說明異常，仍請確認即將生圖會用到此模型。'
+        : fn
+          ? `請確認本機 ComfyUI 是否已有「${fn}」，或至 Civitai 取得相容模型。`
+          : '請確認生圖會使用的 .safetensors 檔名已置於 Comfy 的 checkpoints 資料夾。',
+      hasLocal,
+      browseUrl: buildBrowseUrl(env.civitaiBaseUrl, modelTags, searchQueries),
+    })
+  }
+
+  if (out.length === 0) {
+    out.push({
+      id: randomUUID(),
+      kind: 'other',
+      titleZh: '執行前資源確認',
+      filename: null,
+      modelTags: ['comfyui'],
+      searchQueries: ['workflow resources'],
+      detailZh: '無法從模型回覆取得清單；請依對話與 patch 自行確認所需模型與節點設定已備妥。',
+      hasLocal: false,
+      browseUrl: buildBrowseUrl(env.civitaiBaseUrl, ['comfyui'], ['workflow']),
+    })
+  }
+
+  return out
+}
+
+function parseLlmRowsToChecklist(
+  itemsRaw: unknown[],
+  env: ServerEnv,
+  ckptSet: Set<string>,
+): CreativeLoopResourceChecklistItem[] {
+  const checklist: CreativeLoopResourceChecklistItem[] = []
+  for (let i = 0; i < Math.min(itemsRaw.length, MAX_ITEMS); i++) {
+    const row = itemsRaw[i]
+    if (row == null || typeof row !== 'object' || Array.isArray(row)) continue
+    const r = row as Record<string, unknown>
+    const kind = parseKind(r.kind)
+    const titleZh =
+      typeof r.titleZh === 'string' && r.titleZh.trim() ? r.titleZh.trim().slice(0, 400) : `項目 ${String(i + 1)}`
+    const filename =
+      typeof r.filename === 'string' && r.filename.trim() ? r.filename.trim().slice(0, 400) : null
+    const modelTags = readStringList(r.modelTags, MAX_TAGS)
+    const searchQueries = readStringList(r.searchQueries, MAX_QUERIES)
+    const detailZh =
+      typeof r.detailZh === 'string' && r.detailZh.trim() ? r.detailZh.trim().slice(0, 600) : undefined
+
+    let hasLocal = false
+    if (kind === 'checkpoint' && filename && ckptSet.has(filename)) {
+      hasLocal = true
+    }
+
+    checklist.push({
+      id: randomUUID(),
+      kind,
+      titleZh,
+      filename,
+      modelTags,
+      searchQueries,
+      detailZh,
+      hasLocal,
+      browseUrl: buildBrowseUrl(env.civitaiBaseUrl, modelTags, searchQueries),
+    })
+  }
+  return checklist
 }
 
 export async function runCreativeLoopResourceCheck(
@@ -141,8 +242,8 @@ export async function runCreativeLoopResourceCheck(
     'Task: list concrete resources the user needs to install or verify for THIS generation plan.',
     'Output ONE JSON object only, no markdown.',
     'Keys exactly:',
-    '- "replyZh": Traditional Chinese short intro (what the checklist is for).',
-    '- "items": array, length 1 to ' +
+    '- "replyZh": optional Traditional Chinese short intro (what the checklist is for); if omitted or blank, the server fills from the first checklist item or a default line.',
+    '- "items": REQUIRED array key name must be exactly "items", length 1 to ' +
       String(MAX_ITEMS) +
       '. Each element:',
     '  - "kind": one of "checkpoint" | "lora" | "vae" | "other".',
@@ -176,47 +277,27 @@ export async function runCreativeLoopResourceCheck(
     throw new AppHttpError(502, 'LLM JSON: expected an object')
   }
   const o = parsed as Record<string, unknown>
-  const replyZh = readNonEmptyString(o.replyZh, 'replyZh')
-  const itemsRaw = o.items
-  if (!Array.isArray(itemsRaw) || itemsRaw.length === 0) {
-    throw new AppHttpError(502, 'LLM JSON: "items" must be a non-empty array')
-  }
-
-  const checklist: CreativeLoopResourceChecklistItem[] = []
-  for (let i = 0; i < Math.min(itemsRaw.length, MAX_ITEMS); i++) {
-    const row = itemsRaw[i]
-    if (row == null || typeof row !== 'object' || Array.isArray(row)) continue
-    const r = row as Record<string, unknown>
-    const kind = parseKind(r.kind)
-    const titleZh =
-      typeof r.titleZh === 'string' && r.titleZh.trim() ? r.titleZh.trim().slice(0, 400) : `項目 ${String(i + 1)}`
-    const filename =
-      typeof r.filename === 'string' && r.filename.trim() ? r.filename.trim().slice(0, 400) : null
-    const modelTags = readStringList(r.modelTags, MAX_TAGS)
-    const searchQueries = readStringList(r.searchQueries, MAX_QUERIES)
-    const detailZh =
-      typeof r.detailZh === 'string' && r.detailZh.trim() ? r.detailZh.trim().slice(0, 600) : undefined
-
-    let hasLocal = false
-    if (kind === 'checkpoint' && filename && ckptSet.has(filename)) {
-      hasLocal = true
-    }
-
-    checklist.push({
-      id: randomUUID(),
-      kind,
-      titleZh,
-      filename,
-      modelTags,
-      searchQueries,
-      detailZh,
-      hasLocal,
-      browseUrl: buildBrowseUrl(env.civitaiBaseUrl, modelTags, searchQueries),
-    })
-  }
+  const coerced = coerceLlmItemsArray(o)
+  let usedFallback = false
+  let checklist =
+    coerced != null ? parseLlmRowsToChecklist(coerced, env, ckptSet) : ([] as CreativeLoopResourceChecklistItem[])
 
   if (checklist.length === 0) {
-    throw new AppHttpError(502, 'LLM returned no valid checklist items')
+    usedFallback = true
+    checklist = buildFallbackChecklist(env, proposedPatch, ckptSet, whitelistKeys)
+  }
+
+  const first = checklist[0]
+  let replyZh = resolveAssistantReplyZh({
+    replyRaw: o.replyZh,
+    secondaryLine: first?.titleZh,
+    tertiaryLine: first
+      ? fallbackReplyFromDiscoveryTags(first.modelTags, first.searchQueries)
+      : undefined,
+    finalFallback: CREATIVE_LOOP_RESOURCE_REPLY_FALLBACK_ZH,
+  })
+  if (usedFallback) {
+    replyZh = `${replyZh}（模型回傳清單不完整，已自動產生基本項目，請仍須逐項確認。）`
   }
 
   const noteZh =

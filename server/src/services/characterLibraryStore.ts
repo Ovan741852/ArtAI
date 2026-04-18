@@ -10,6 +10,32 @@ export type CharacterImageRecord = {
   relPath: string
   mime: string
   addedAt: string
+  sampling?: CharacterImageSamplingRecord
+}
+
+export type CharacterImageSamplingRecord = {
+  version: 1
+  computedAt: string
+  ollamaModel: string
+  decision: 'accept' | 'low_confidence' | 'reject'
+  identityScore: number
+  isHuman: boolean
+  mattingAttempted: boolean
+  mattingUsed: boolean
+  mattingFallbackUsed: boolean
+  reasonsEn: string[]
+  featureWeights: {
+    face: number
+    facialFeatures: number
+    globalMatted: number
+    globalOriginal: number
+  }
+  featureSignals: {
+    faceScore: number
+    facialFeatureScore: number
+    globalMattedScore: number
+    globalOriginalScore: number
+  }
 }
 
 export type CharacterProfileRecord = {
@@ -53,12 +79,52 @@ function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
 function isCharacterImageRecord(x: unknown): x is CharacterImageRecord {
   if (x == null || typeof x !== 'object') return false
   const o = x as Record<string, unknown>
+  const sampling = o.sampling
   return (
     typeof o.id === 'string' &&
     typeof o.relPath === 'string' &&
     typeof o.mime === 'string' &&
-    typeof o.addedAt === 'string'
+    typeof o.addedAt === 'string' &&
+    (sampling === undefined || isCharacterImageSamplingRecord(sampling))
   )
+}
+
+function isCharacterImageSamplingRecord(x: unknown): x is CharacterImageSamplingRecord {
+  if (x == null || typeof x !== 'object') return false
+  const o = x as Record<string, unknown>
+  if (o.version !== 1 || typeof o.computedAt !== 'string' || typeof o.ollamaModel !== 'string') return false
+  if (o.decision !== 'accept' && o.decision !== 'low_confidence' && o.decision !== 'reject') return false
+  if (typeof o.identityScore !== 'number' || !Number.isFinite(o.identityScore)) return false
+  if (typeof o.isHuman !== 'boolean') return false
+  if (typeof o.mattingAttempted !== 'boolean') return false
+  if (typeof o.mattingUsed !== 'boolean') return false
+  if (typeof o.mattingFallbackUsed !== 'boolean') return false
+  if (!Array.isArray(o.reasonsEn) || !o.reasonsEn.every((x) => typeof x === 'string')) return false
+
+  const weights = o.featureWeights
+  if (weights == null || typeof weights !== 'object') return false
+  const w = weights as Record<string, unknown>
+  if (
+    typeof w.face !== 'number' ||
+    typeof w.facialFeatures !== 'number' ||
+    typeof w.globalMatted !== 'number' ||
+    typeof w.globalOriginal !== 'number'
+  ) {
+    return false
+  }
+
+  const signals = o.featureSignals
+  if (signals == null || typeof signals !== 'object') return false
+  const s = signals as Record<string, unknown>
+  if (
+    typeof s.faceScore !== 'number' ||
+    typeof s.facialFeatureScore !== 'number' ||
+    typeof s.globalMattedScore !== 'number' ||
+    typeof s.globalOriginalScore !== 'number'
+  ) {
+    return false
+  }
+  return true
 }
 
 function isCharacterProfileRecord(x: unknown): x is CharacterProfileRecord {

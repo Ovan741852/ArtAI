@@ -1,5 +1,8 @@
 import type { ServerEnv } from '../config/env.js'
-import { readOptionalAssistantReplyLine } from '../lib/assistantLlmUserReply.js'
+import {
+  MODEL_BUNDLE_ASSISTANT_REPLY_FALLBACK_EN,
+  resolveAssistantReplyZh,
+} from '../lib/assistantLlmUserReply.js'
 import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
@@ -342,8 +345,11 @@ export async function completeModelBundleAssistantFromLlmRaw(
 
   const o = parsed as Record<string, unknown>
   const specs = parseBundlesFromLlm(o)
-  const replyZh =
-    readOptionalAssistantReplyLine(o.replyZh) || specs[0]?.titleZh || 'See download bundles below.'
+  const replyZh = resolveAssistantReplyZh({
+    replyRaw: o.replyZh,
+    secondaryLine: specs[0]?.titleZh,
+    finalFallback: MODEL_BUNDLE_ASSISTANT_REPLY_FALLBACK_EN,
+  })
 
   const bundles: ModelBundleResolved[] = []
   for (const spec of specs) {

@@ -1,6 +1,6 @@
 import { AppHttpError } from './civitaiCheckpointSummary.js'
 import { parseOllamaVisionImagesFromBody } from './ollamaVisionImagesFromBody.js'
-import { listWorkflowTemplates } from './workflowTemplatesRegistry.js'
+import { listWorkflowTemplates, resolveWorkflowTemplatesDir } from './workflowTemplatesRegistry.js'
 
 /** 僅計使用者參考圖（不含 lastOutputPngBase64）。 */
 export function countUserReferenceImages(body: Record<string, unknown>): number {
@@ -38,7 +38,10 @@ export async function resolveCreativeLoopTemplate(body: Record<string, unknown>)
   }
 
   if (!ids.has('basic-txt2img')) {
-    throw new AppHttpError(502, 'Server is missing required workflow template: basic-txt2img')
+    throw new AppHttpError(
+      502,
+      `找不到必要模板 basic-txt2img（workflow 目錄內無此 id）。請確認後端能讀到 data/workflow-templates，或設定 WORKFLOW_TEMPLATES_DIR。目前解析目錄：${resolveWorkflowTemplatesDir()}`,
+    )
   }
 
   return {

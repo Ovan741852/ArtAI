@@ -4,6 +4,7 @@ import { fetchCheckpointList } from './comfyuiCheckpoints.js'
 import { readCharacterImageFile } from './characterLibraryAssets.js'
 import { runComfyPromptToFirstPngBuffer } from './comfyPromptExecution.js'
 import { findCharacterById, readCharacterLibraryIndex, type CharacterRecord } from './characterLibraryStore.js'
+import { decodeMattingImageBase64 } from './mattingImageBytes.js'
 import { ollamaGenerateNonStream } from './ollamaGenerate.js'
 import { runWorkflowTemplateOnComfy } from './workflowTemplateRun.js'
 
@@ -151,6 +152,8 @@ async function planGenerationWithAi(params: {
   checkpoints: string[]
   forcedCheckpoint?: string
   previousCheckpoint?: string
+  /** Base64 without data URL prefix; previous Comfy output for vision models. */
+  previousOutputImageBase64?: string
 }): Promise<AiPlan | null> {
   const profileStr =
     params.profileEn && Object.keys(params.profileEn).length > 0
@@ -158,13 +161,24 @@ async function planGenerationWithAi(params: {
       : '(none)'
   const checkpoints = JSON.stringify(params.checkpoints.slice(0, 120), null, 0)
   const forced = params.forcedCheckpoint ? params.forcedCheckpoint.trim() : ''
+  const visionLines =
+    params.previousOutputImageBase64 != null && params.previousOutputImageBase64.trim() !== ''
+      ? [
+          '',
+          'Vision: The FIRST attached image is the user\'s PREVIOUS generation output (not the character anchor).',
+          'Use it together with feedbackZh to judge what to change (style, face, composition, etc.).',
+          'If feedbackZh is (none), you may still use the image as weak context for checkpoint choice.',
+          '',
+        ]
+      : ['']
+
   const prompt = [
     'You are a Stable Diffusion generation planner.',
     'Output ONE JSON object only (no markdown).',
     'Choose a checkpoint and optional parameter tweaks based on the user goal and feedback.',
     'If forcedCheckpoint is provided, you MUST keep that checkpoint value unchanged.',
     'All descriptions in the JSON should be concise.',
-    '',
+    ...visionLines,
     'JSON keys allowed:',
     '{"checkpoint":string,"reasonZh":string,"promptAppendEn":string,"negativeAppendEn":string,"steps":number,"cfg":number,"width":number,"height":number,"denoise":number,"sampler_name":string,"scheduler":string,"seed":number}',
     '',
@@ -184,12 +198,18 @@ async function planGenerationWithAi(params: {
     '- Keep numeric values practical for SD1.5.',
   ].join('\n')
 
+  const imgs =
+    params.previousOutputImageBase64 != null && params.previousOutputImageBase64.trim() !== ''
+      ? [params.previousOutputImageBase64.trim()]
+      : undefined
+
   let raw: string
   try {
     raw = await ollamaGenerateNonStream({
       ollamaBaseUrl: params.env.ollamaBaseUrl,
       model: params.model,
       prompt,
+      images: imgs,
       format: 'json',
     })
   } catch {
@@ -309,6 +329,31 @@ export async function runCharacterTxt2imgFromLibrary(params: {
   const ckptRaw = typeof rec.checkpoint === 'string' ? rec.checkpoint.trim() : ''
   const autoCheckpoint = rec.autoCheckpointByAi !== false
   const needAiPlanning = autoCheckpoint || feedbackZh != null
+
+  const lastOutRaw =
+    typeof rec.lastOutputPngBase64 === 'string' && rec.lastOutputPngBase64.trim()
+      ? rec.lastOutputPngBase64.trim()
+      : ''
+  if (feedbackZh != null && !lastOutRaw) {
+    throw new AppHttpError(
+      400,
+      '填寫回饋（feedbackZh）時請一併附上上一張成品圖（lastOutputPngBase64，與回應欄位 imagePngBase64 相同格式）',
+    )
+  }
+
+  let planVisionImageBase64: string | undefined
+  if (needAiPlanning && lastOutRaw) {
+    try {
+      const dec = decodeMattingImageBase64(lastOutRaw)
+      planVisionImageBase64 = dec.buffer.toString('base64')
+    } catch (e) {
+      if (e instanceof AppHttpError) {
+        throw new AppHttpError(400, `lastOutputPngBase64 無效：${e.message}`)
+      }
+      throw e
+    }
+  }
+
   let aiPlan: AiPlan | null = null
   if (needAiPlanning) {
     aiPlan = await planGenerationWithAi({
@@ -321,6 +366,7 @@ export async function runCharacterTxt2imgFromLibrary(params: {
       checkpoints,
       forcedCheckpoint: ckptRaw || undefined,
       previousCheckpoint: typeof rec.previousCheckpointUsed === 'string' ? rec.previousCheckpointUsed : undefined,
+      previousOutputImageBase64: planVisionImageBase64,
     })
   }
 

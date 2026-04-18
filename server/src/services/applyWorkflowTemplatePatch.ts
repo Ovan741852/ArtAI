@@ -51,11 +51,15 @@ function coerceValue(
     return coerceToNonEmptyString(key, raw)
   }
   if (spec.type === 'int') {
-    const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN
-    if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    if (typeof raw === 'string' && !raw.trim()) {
       return { ok: false, message: `param "${key}": expected integer` }
     }
-    return { ok: true, value: clampNum(n, spec.min, spec.max) }
+    const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : NaN
+    if (!Number.isFinite(n)) {
+      return { ok: false, message: `param "${key}": expected integer` }
+    }
+    const intVal = Math.round(n)
+    return { ok: true, value: clampNum(intVal, spec.min, spec.max) }
   }
   const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN
   if (!Number.isFinite(n)) {

@@ -8,12 +8,9 @@ import {
   writeCharacterLibraryIndex,
   type CharacterRecord,
 } from './characterLibraryStore.js'
+import { runAnchorAutoSampling, runIdentityAutoSampling } from './characterSamplingOrchestrator.js'
 import { decodeMattingImageBase64 } from './mattingImageBytes.js'
-import {
-  evaluateAnchorPortraitGate,
-  evaluateIdentityContinuationGate,
-  evaluateProfileRefresh,
-} from './characterLibraryVisionGates.js'
+import { evaluateProfileRefresh } from './characterLibraryVisionGates.js'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -26,15 +23,18 @@ export async function commandCreateCharacter(params: {
   ollamaModel?: string
 }): Promise<CharacterRecord> {
   const decoded = decodeMattingImageBase64(params.imageBase64)
-  const imageB64 = decoded.buffer.toString('base64')
-
-  const gate = await evaluateAnchorPortraitGate({
+  const sampling = await runAnchorAutoSampling({
     env: params.env,
-    imageBase64NoPrefix: imageB64,
+    candidateImageBase64NoPrefix: decoded.buffer.toString('base64'),
     ollamaModel: params.ollamaModel,
   })
-  if (!gate.accepted) {
-    throw new AppHttpError(422, gate.messageZh, { gate: 'anchor', machine: gate.machine, ollamaModel: gate.ollamaModel })
+  if (sampling.record.decision === 'reject') {
+    throw new AppHttpError(422, sampling.messageZh, {
+      gate: 'anchor',
+      machine: sampling.anchorGate.machine,
+      ollamaModel: sampling.record.ollamaModel,
+      sampling: sampling.record,
+    })
   }
 
   const characterId = randomUUID()
@@ -67,6 +67,7 @@ export async function commandCreateCharacter(params: {
         relPath,
         mime: decoded.mime,
         addedAt: t,
+        sampling: sampling.record,
       },
     ],
     profile: null,
@@ -95,22 +96,20 @@ export async function commandAddCharacterImage(params: {
 
   const anchor = existing.images[0]
   const anchorFile = await readCharacterImageFile(params.env, anchor.relPath)
-  const anchorB64 = anchorFile.buffer.toString('base64')
 
   const decoded = decodeMattingImageBase64(params.imageBase64)
-  const candB64 = decoded.buffer.toString('base64')
-
-  const gate = await evaluateIdentityContinuationGate({
+  const sampling = await runIdentityAutoSampling({
     env: params.env,
-    anchorImageBase64NoPrefix: anchorB64,
-    candidateImageBase64NoPrefix: candB64,
+    anchorImageBase64NoPrefix: anchorFile.buffer.toString('base64'),
+    candidateImageBase64NoPrefix: decoded.buffer.toString('base64'),
     ollamaModel: params.ollamaModel,
   })
-  if (!gate.accepted) {
-    throw new AppHttpError(422, gate.messageZh, {
+  if (sampling.record.decision === 'reject') {
+    throw new AppHttpError(422, sampling.messageZh, {
       gate: 'identity',
-      machine: gate.machine,
-      ollamaModel: gate.ollamaModel,
+      machine: sampling.identityGate?.machine ?? sampling.anchorGate.machine,
+      ollamaModel: sampling.record.ollamaModel,
+      sampling: sampling.record,
     })
   }
 
@@ -129,6 +128,7 @@ export async function commandAddCharacterImage(params: {
     relPath,
     mime: decoded.mime,
     addedAt: t,
+    sampling: sampling.record,
   })
   existing.updatedAt = t
   index.updatedAt = t

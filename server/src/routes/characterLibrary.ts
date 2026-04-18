@@ -311,6 +311,7 @@ function formatCharacterDetail(ch: import('../services/characterLibraryStore.js'
     /** Relative HTTP path; prefix with API base (e.g. Vite `/api`). */
     filePath: filePathForImage(ch.id, im.id),
     isAnchor: ch.images[0]?.id === im.id,
+    sampling: im.sampling ?? null,
   }))
   return {
     human: {

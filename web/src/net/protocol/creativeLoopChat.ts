@@ -1,4 +1,8 @@
 import { HttpPacket, HttpRequest } from '../http/types'
+import {
+  CREATIVE_LOOP_ASSISTANT_REPLY_FALLBACK_ZH,
+  resolveAssistantReplyZhFromAssistantPayload,
+} from './assistantUserReplyLine'
 
 export type CreativeLoopChatMessage = {
   role: 'user' | 'assistant'
@@ -105,11 +109,7 @@ export class CreativeLoopChatRsp extends HttpPacket {
       return
     }
     const as = assistant as Record<string, unknown>
-    const replyZh = typeof as.replyZh === 'string' ? as.replyZh : ''
-    if (!replyZh.trim()) {
-      this.message = '回應缺少 replyZh'
-      return
-    }
+    const replyZh = resolveAssistantReplyZhFromAssistantPayload(as, CREATIVE_LOOP_ASSISTANT_REPLY_FALLBACK_ZH)
     const proposedPatch =
       as.proposedPatch != null && typeof as.proposedPatch === 'object' && !Array.isArray(as.proposedPatch)
         ? { ...(as.proposedPatch as Record<string, unknown>) }

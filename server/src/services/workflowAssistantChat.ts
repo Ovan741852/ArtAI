@@ -1,5 +1,9 @@
 import type { ServerEnv } from '../config/env.js'
-import { readOptionalAssistantReplyLine } from '../lib/assistantLlmUserReply.js'
+import {
+  readOptionalUnderstandingZh,
+  resolveAssistantReplyZh,
+  WORKFLOW_ASSISTANT_REPLY_FALLBACK_EN,
+} from '../lib/assistantLlmUserReply.js'
 import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { applyWorkflowTemplatePatch } from './applyWorkflowTemplatePatch.js'
@@ -62,9 +66,6 @@ export type PreparedWorkflowAssistantTurn = {
 
 const MAX_MESSAGES = 24
 const MAX_CONTENT_LEN = 8000
-
-const WORKFLOW_ASSISTANT_REPLY_FALLBACK =
-  'Pick a template or describe what you want to change.'
 
 function normalizeMessages(raw: unknown): WorkflowAssistantMessage[] {
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -279,14 +280,12 @@ export async function completeWorkflowAssistantFromLlmRaw(
   }
 
   const o = parsed as Record<string, unknown>
-  const understandingZh =
-    typeof o.understandingZh === 'string' && o.understandingZh.trim()
-      ? o.understandingZh.trim().slice(0, 1200)
-      : undefined
-  const replyZh =
-    readOptionalAssistantReplyLine(o.replyZh) ||
-    (understandingZh ? understandingZh.slice(0, 220) : '') ||
-    WORKFLOW_ASSISTANT_REPLY_FALLBACK
+  const understandingZh = readOptionalUnderstandingZh(o.understandingZh)
+  const replyZh = resolveAssistantReplyZh({
+    replyRaw: o.replyZh,
+    understandingZh,
+    finalFallback: WORKFLOW_ASSISTANT_REPLY_FALLBACK_EN,
+  })
   const confirmationOptionsZh = coerceLlmStringList(o.confirmationOptionsZh, 4)
   const intentEn = parseIntentEn(o.intentEn)
 

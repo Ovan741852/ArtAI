@@ -44,6 +44,29 @@ function randomId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+/** 盤點清單若已標示本機有的 checkpoint，生圖時覆寫 AI patch 內可能錯誤的 ckpt_name（避免 Comfy value_not_in_list）。 */
+function mergeCkptNameFromChecklist(
+  patch: Record<string, unknown>,
+  checklist: CreativeLoopResourceChecklistItem[],
+  checked: Record<string, boolean>,
+): Record<string, unknown> {
+  const out = { ...patch }
+  const rows = checklist.filter(
+    (it) => it.kind === 'checkpoint' && it.filename && it.hasLocal === true && checked[it.id] === true,
+  )
+  if (rows.length === 1) {
+    out.ckpt_name = rows[0].filename
+    return out
+  }
+  if (rows.length > 1) {
+    const want = typeof out.ckpt_name === 'string' ? out.ckpt_name.trim() : ''
+    const hit = rows.find((r) => r.filename === want)
+    out.ckpt_name = hit?.filename ?? rows[0].filename
+    return out
+  }
+  return out
+}
+
 function kindLabelZh(kind: CreativeLoopResourceChecklistItem['kind']): string {
   switch (kind) {
     case 'checkpoint':
@@ -318,8 +341,9 @@ export function CreativeLoopPanelWindow() {
     setBusy(true)
     setErr(null)
     const refB64 = plannedTemplateId === 'basic-img2img' && refs[0]?.base64 ? refs[0].base64 : undefined
+    const patchForRun = mergeCkptNameFromChecklist(lastProposedPatch ?? {}, checklist, checklistChecked)
     const res = await client.sendRequest(
-      WorkflowTemplateRunReq.allocate(plannedTemplateId, lastProposedPatch ?? {}, undefined, refB64 ?? null),
+      WorkflowTemplateRunReq.allocate(plannedTemplateId, patchForRun, undefined, refB64 ?? null),
       WorkflowTemplateRunRsp,
     )
     setBusy(false)
@@ -340,7 +364,17 @@ export function CreativeLoopPanelWindow() {
     setAwaitRating(true)
     setSelectedTags(new Set())
     setFeedbackText('')
-  }, [plannedTemplateId, resourceCheckReady, allChecklistChecked, awaitRating, lastProposedPatch, refs, revokeResultUrl])
+  }, [
+    plannedTemplateId,
+    resourceCheckReady,
+    allChecklistChecked,
+    awaitRating,
+    lastProposedPatch,
+    checklist,
+    checklistChecked,
+    refs,
+    revokeResultUrl,
+  ])
 
   const submitRating = useCallback(() => {
     if (!awaitRating) return

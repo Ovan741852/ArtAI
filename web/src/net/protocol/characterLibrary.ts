@@ -89,6 +89,18 @@ export type CharacterDetailImage = {
   mime: string
   filePath: string
   isAnchor: boolean
+  sampling?: {
+    version: 1
+    computedAt: string
+    ollamaModel: string
+    decision: 'accept' | 'low_confidence' | 'reject'
+    identityScore: number
+    isHuman: boolean
+    mattingAttempted: boolean
+    mattingUsed: boolean
+    mattingFallbackUsed: boolean
+    reasonsEn: string[]
+  } | null
 }
 
 export type CharacterDetailData = {
@@ -168,6 +180,7 @@ export class CharacterDetailRsp extends HttpPacket {
           mime: typeof r.mime === 'string' ? r.mime : '',
           filePath: r.filePath,
           isAnchor: r.isAnchor === true,
+          sampling: parseImageSampling(r.sampling),
         })
       }
     }
@@ -193,6 +206,37 @@ export class CharacterDetailRsp extends HttpPacket {
         images,
       },
     }
+  }
+}
+
+function parseImageSampling(v: unknown): CharacterDetailImage['sampling'] {
+  if (v == null || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  if (
+    o.version !== 1 ||
+    typeof o.computedAt !== 'string' ||
+    typeof o.ollamaModel !== 'string' ||
+    (o.decision !== 'accept' && o.decision !== 'low_confidence' && o.decision !== 'reject') ||
+    typeof o.identityScore !== 'number' ||
+    typeof o.isHuman !== 'boolean' ||
+    typeof o.mattingAttempted !== 'boolean' ||
+    typeof o.mattingUsed !== 'boolean' ||
+    typeof o.mattingFallbackUsed !== 'boolean' ||
+    !Array.isArray(o.reasonsEn)
+  ) {
+    return null
+  }
+  return {
+    version: 1,
+    computedAt: o.computedAt,
+    ollamaModel: o.ollamaModel,
+    decision: o.decision,
+    identityScore: o.identityScore,
+    isHuman: o.isHuman,
+    mattingAttempted: o.mattingAttempted,
+    mattingUsed: o.mattingUsed,
+    mattingFallbackUsed: o.mattingFallbackUsed,
+    reasonsEn: o.reasonsEn.filter((x): x is string => typeof x === 'string'),
   }
 }
 

@@ -1,4 +1,5 @@
-import fs from 'node:fs/promises'
+import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import path from 'node:path'
 
 export type WhitelistParamSpec = {
@@ -33,12 +34,33 @@ export type WorkflowTemplateListItem = {
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 
+function directoryHasWorkflowJson(dir: string): boolean {
+  try {
+    const names = fs.readdirSync(dir, { withFileTypes: true })
+    return names.some((d) => d.isFile() && d.name.endsWith('.json'))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 預設為 `cwd/data/workflow-templates`；若該目錄無任何 `.json`（常見於從 `server/` 子目錄啟動），改試 `cwd/../data/workflow-templates`（repo 根之 `data/`）。
+ */
 export function resolveWorkflowTemplatesDir(): string {
   const raw = process.env.WORKFLOW_TEMPLATES_DIR?.trim()
   if (raw && raw !== '') {
     return path.resolve(raw)
   }
-  return path.resolve(process.cwd(), 'data', 'workflow-templates')
+  const cwd = process.cwd()
+  const underCwd = path.resolve(cwd, 'data', 'workflow-templates')
+  const underParent = path.resolve(cwd, '..', 'data', 'workflow-templates')
+  if (directoryHasWorkflowJson(underCwd)) {
+    return underCwd
+  }
+  if (directoryHasWorkflowJson(underParent)) {
+    return underParent
+  }
+  return underCwd
 }
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
@@ -136,7 +158,7 @@ export function parseWorkflowTemplateDoc(raw: unknown, sourceLabel: string): Wor
 async function readTemplateJsonFiles(dir: string): Promise<Array<{ name: string; text: string }>> {
   let names: string[]
   try {
-    names = await fs.readdir(dir)
+    names = await fsp.readdir(dir)
   } catch (e) {
     const code = (e as NodeJS.ErrnoException)?.code
     if (code === 'ENOENT') {
@@ -148,7 +170,7 @@ async function readTemplateJsonFiles(dir: string): Promise<Array<{ name: string;
   const out: Array<{ name: string; text: string }> = []
   for (const name of jsonFiles) {
     const p = path.join(dir, name)
-    const text = await fs.readFile(p, 'utf8')
+    const text = await fsp.readFile(p, 'utf8')
     out.push({ name, text })
   }
   return out
@@ -187,7 +209,7 @@ export async function getWorkflowTemplateById(id: string): Promise<WorkflowTempl
   const filePath = path.join(dir, `${id}.json`)
   let text: string
   try {
-    text = await fs.readFile(filePath, 'utf8')
+    text = await fsp.readFile(filePath, 'utf8')
   } catch (e) {
     const code = (e as NodeJS.ErrnoException)?.code
     if (code === 'ENOENT') {

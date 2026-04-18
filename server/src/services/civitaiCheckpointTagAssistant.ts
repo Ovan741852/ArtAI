@@ -1,7 +1,8 @@
 import type { ServerEnv } from '../config/env.js'
 import {
+  CHECKPOINT_TAG_DISCOVERY_FALLBACK_EN,
   fallbackReplyFromDiscoveryTags,
-  readOptionalAssistantReplyLine,
+  resolveAssistantReplyZh,
 } from '../lib/assistantLlmUserReply.js'
 import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
@@ -252,9 +253,11 @@ export async function completeCheckpointTagAssistantFromLlmRaw(
   const o = parsed as Record<string, unknown>
   const modelTags = coerceLlmStringList(o.modelTags, 6)
   const searchQueries = coerceLlmStringList(o.searchQueries, 4)
-  const replyZh =
-    readOptionalAssistantReplyLine(o.replyZh) ||
-    fallbackReplyFromDiscoveryTags(modelTags, searchQueries)
+  const replyZh = resolveAssistantReplyZh({
+    replyRaw: o.replyZh,
+    tertiaryLine: fallbackReplyFromDiscoveryTags(modelTags, searchQueries),
+    finalFallback: CHECKPOINT_TAG_DISCOVERY_FALLBACK_EN,
+  })
 
   let recommendedModels: CivitaiModelRow[] = []
   if (modelTags.length > 0 || searchQueries.length > 0) {

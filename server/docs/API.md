@@ -24,7 +24,7 @@
 
 ## Comfy Workflow 模板（ArtAI 內建）
 
-模板為伺服器工作目錄下 **`data/workflow-templates/*.json`**（與本機 checkpoint 目錄檔 `catalog` 分開）。可用 **`WORKFLOW_TEMPLATES_DIR`** 覆寫為絕對路徑。檔名須為 `{id}.json` 且 JSON 內 **`id`** 欄位與檔名一致。
+模板為伺服器工作目錄下 **`data/workflow-templates/*.json`**（與本機 checkpoint 目錄檔 `catalog` 分開）。未設 **`WORKFLOW_TEMPLATES_DIR`** 且工作目錄下該資料夾內**沒有任何** `*.json` 時，會再嘗試**上一層** `../data/workflow-templates`（方便從 `server/` 子目錄啟動仍讀到 repo 根目錄的模板）。可用 **`WORKFLOW_TEMPLATES_DIR`** 覆寫為絕對路徑。檔名須為 `{id}.json` 且 JSON 內 **`id`** 欄位與檔名一致。
 
 | 方法 | 路徑 | 用途 |
 |------|------|------|
@@ -242,9 +242,9 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 | 方法 | 路徑 | 用途 |
 |------|------|------|
 | `GET` | `/characters` | 列表：`characters[]`（`id`、`displayName`、`imageCount`、`updatedAt`、`summaryZh`）、`count`、`storePath`、`filesDir`。 |
-| `POST` | `/characters` | 建立角色：`imageBase64`（錨點，必填）、`displayName`（選填字串）、`ollamaModel`（選填）。錨點 gate 未通過時 **422**，`ok: false`、`message`，並可含 `gate`、`machine`、`ollamaModel`。成功時 `character` 見下「詳情形狀」。 |
+| `POST` | `/characters` | 建立角色：`imageBase64`（錨點，必填）、`displayName`（選填字串）、`ollamaModel`（選填）。伺服器會走**自動人物採樣**（人像 gate + 去背可行性分類 + 分數決策）；拒絕時 **422**，`ok: false`、`message`，並可含 `gate`、`machine`、`ollamaModel`、`sampling`。成功時 `character` 見下「詳情形狀」。 |
 | `GET` | `/characters/:id` | 詳情；未知 id **404**。 |
-| `POST` | `/characters/:id/images` | 加一張參考圖：`imageBase64`（必填）、`ollamaModel`（選填）。身分 gate 未通過時 **422**（欄位同上）。 |
+| `POST` | `/characters/:id/images` | 加一張參考圖：`imageBase64`（必填）、`ollamaModel`（選填）。伺服器會與錨點做**自動人物採樣**（同人 gate + 去背可行性分類 + 分數決策）；拒絕時 **422**（欄位同上）。 |
 | `POST` | `/characters/:id/profile/refresh` | 依目前最多 **6** 張參考圖（由錨點起算）請 Ollama 產出 **`profileEn`（英文結構化物件）** 與 **`summaryZh`**（繁中摘要）並寫回索引。Body 可為空物件或 `{ "ollamaModel"?: string }`。無圖時 **400**。 |
 | `POST` | `/characters/:id/generations/txt2img` | **試作文生圖**：讀取該角色之 `profile`（可為空），將使用者 **`prompt`**（可繁中）與角色摘要合併；預設先以 **Ollama**（`useOllamaExpansion` 未設為 `false` 時）產出**英文**正向提示詞，失敗則改為字串備援；再以模板 **`basic-txt2img`** 送 **ComfyUI** 並回傳 **PNG base64**（無 data URL 前綴）。未知角色 **404**；Comfy／模板錯誤 **502**；參數錯誤 **400**。 |
 | `GET` | `/characters/:id/images/:imageId/file` | 回傳已存圖檔 bytes，`Content-Type` 為 `image/jpeg`／`image/png`／`image/webp`。 |
@@ -260,7 +260,8 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 - `timeoutMs`（選填）：同 **`POST /workflows/templates/:id/run`**，**10000–1800000**。
 - `useOllamaExpansion`（選填布林）：`false` 時略過 Ollama 擴寫，改以字串備援合併角色欄位與 `prompt`。
 - `ollamaModel`（選填）：擴寫用；省略時使用 `OLLAMA_SUMMARY_MODEL`。
-- `feedbackZh`（選填字串）：對上一張結果的回饋（繁中）；若提供，AI 會嘗試同時調整 checkpoint 選擇、`prompt` 追加詞與部分參數（在安全範圍內）。
+- `feedbackZh`（選填字串）：對上一張結果的回饋（繁中）；若提供，AI 會嘗試同時調整 checkpoint 選擇、`prompt` 追加詞與部分參數（在安全範圍內）。**與 `feedbackZh` 同時必填**：`lastOutputPngBase64`（見下）。
+- `lastOutputPngBase64`（選填字串）：上一輪 **`imagePngBase64`** 同款格式之圖（可含 `data:image/...;base64,` 前綴）；當 **`feedbackZh` 有內容時必填**。伺服器會在 AI 規劃步驟以 Ollama **`images`** 傳入，讓模型「看過上一張再改」；建議 **`ollamaModel` 使用支援視覺的模型**（如 llava 系列），否則 Ollama 可能拒絕帶圖請求。
 - `previousCheckpointUsed`（選填字串）：上一輪實際用到的 checkpoint（可幫助 AI 在回饋調整時比較前後策略）。
 - `identityMode`（選填字串）：`"anchor_img2img"`（預設）或 `"text_only"`。`anchor_img2img` 會把角色第一張錨點圖上傳至 Comfy，走 `LoadImage -> VAEEncode -> KSampler(denoise)`，通常較能維持同一人外觀。
 - `denoise`（選填數字）：僅 `anchor_img2img` 生效，範圍建議 `0~1`（伺服器會夾住）。越低越貼近錨點、越高越自由；預設 `0.58`。
@@ -270,7 +271,8 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 **詳情 `character` 形狀（`GET /characters/:id` 與各 POST 成功時）：**
 
 - `human`：`id`、`displayName`、`summaryZh`、`imageCount`、`createdAt`、`updatedAt`。
-- `machine`：`characterId`、`profileEn`（物件或 `null`）、`profileMergedAt`（ISO 或 `null`）、`images[]`（`id`、`addedAt`、`mime`、`filePath`（相對於 API 根之路徑，前端需加 base，例如 Vite `VITE_API_BASE_URL`）、`isAnchor`）。
+- `machine`：`characterId`、`profileEn`（物件或 `null`）、`profileMergedAt`（ISO 或 `null`）、`images[]`（`id`、`addedAt`、`mime`、`filePath`（相對於 API 根之路徑，前端需加 base，例如 Vite `VITE_API_BASE_URL`）、`isAnchor`、`sampling`）。
+- `sampling`（可能為 `null`）：自動採樣機器欄位，含 `decision`（`accept` / `low_confidence` / `reject`）、`identityScore`（0~1）、`isHuman`、`mattingUsed`、`mattingFallbackUsed`、`reasonsEn[]`、`computedAt`、`ollamaModel`。
 
 ---
 

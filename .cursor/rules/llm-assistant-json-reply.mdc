@@ -1,0 +1,13 @@
+# LLM `format: json` — 使用者可見一句（`replyZh`）
+
+## 伺服器
+
+- **`replyZh` 鍵名為歷史遺留**（內容不限繁中）；Ollama 常**省略**或回傳**空白**字串。
+- **禁止**因 `replyZh` 空而拋 **502**（例如 `LLM JSON: "replyZh" must be a non-empty string`）。一律經 **`resolveAssistantReplyZh`**（`server/src/lib/assistantLlmUserReply.ts`）或同等語意：先 `readOptionalAssistantReplyLine`，再 `understandingZh` 截斷、**`secondaryLine`／`tertiaryLine`**、最後 **`finalFallback`**。
+- 各產品線的 **最後一句後備** 請用該檔案內**已匯出常數**（或同檔新增常數），避免各 service 各寫一句英文／繁中分叉。
+- Prompt 文案應寫明 **`replyZh` 可省略**，由伺服器補齊（與 workflow／checkpoint 助手一致）。
+
+## 前端 protocol
+
+- 解 **`assistant.replyZh`** 時與伺服器同序後備；**不要**僅因空字串就視為 decode 失敗（`web/src/net/protocol/assistantUserReplyLine.ts` 與伺服器字串**需同步**）。
+- 新增會解析 LLM JSON 的 endpoint 時：後端用共用 lib、前端 decode 用共用 helper，**流程對齊**。

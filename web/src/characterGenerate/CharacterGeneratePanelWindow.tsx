@@ -44,6 +44,8 @@ export function CharacterGeneratePanelWindow() {
   const [checkpointDecisionZh, setCheckpointDecisionZh] = useState<string | null>(null)
   const [feedbackApplied, setFeedbackApplied] = useState(false)
   const [lastCheckpointUsed, setLastCheckpointUsed] = useState<string | null>(null)
+  /** 上一輪成功回傳的 PNG base64（無 data URL 前綴），有填回饋時會一併送給伺服器做視覺規劃 */
+  const [lastOutputBase64, setLastOutputBase64] = useState<string | null>(null)
 
   const loadCharacters = useCallback(async () => {
     const res = await client.send(CharactersListReq.allocate(), CharactersListRsp)
@@ -76,6 +78,10 @@ export function CharacterGeneratePanelWindow() {
     void loadCharacters()
     void loadCheckpoints()
   }, [loadCharacters, loadCheckpoints])
+
+  useEffect(() => {
+    setLastOutputBase64(null)
+  }, [characterId])
 
   useEffect(() => {
     let cancelled = false
@@ -129,6 +135,10 @@ export function CharacterGeneratePanelWindow() {
       setErr('請輸入想生成的內容（提示詞）')
       return
     }
+    if (feedbackZh.trim() && !lastOutputBase64) {
+      setErr('填回饋前請先完成一輪生成，讓系統能附上上一張成品圖；或先清空回饋再試。')
+      return
+    }
 
     const payload: Record<string, unknown> = {
       prompt: p,
@@ -138,6 +148,7 @@ export function CharacterGeneratePanelWindow() {
     }
     if (!autoCheckpointByAi && checkpoint.trim()) payload.checkpoint = checkpoint.trim()
     if (feedbackZh.trim()) payload.feedbackZh = feedbackZh.trim()
+    if (lastOutputBase64) payload.lastOutputPngBase64 = lastOutputBase64
     if (lastCheckpointUsed) payload.previousCheckpointUsed = lastCheckpointUsed
     if (negative.trim()) payload.negative = negative.trim()
     const sn = Number(steps)
@@ -177,6 +188,7 @@ export function CharacterGeneratePanelWindow() {
     setCheckpointDecisionZh(d.checkpointDecisionZh || null)
     setFeedbackApplied(d.feedbackApplied)
     setLastCheckpointUsed(d.checkpointUsed || null)
+    setLastOutputBase64(d.imagePngBase64)
     try {
       const bin = atob(d.imagePngBase64)
       const bytes = new Uint8Array(bin.length)
@@ -195,6 +207,7 @@ export function CharacterGeneratePanelWindow() {
     feedbackZh,
     height,
     lastCheckpointUsed,
+    lastOutputBase64,
     negative,
     ollamaPicked,
     prompt,
@@ -212,7 +225,8 @@ export function CharacterGeneratePanelWindow() {
         <h2 className="chgen__title">角色文生圖試作</h2>
         <p className="chgen__lead">
           選擇角色庫裡的一位角色，用一句話描述想生成的畫面。伺服器會把角色的<strong>摘要／profile</strong>與你的描述交給
-          Ollama 轉成英文提示詞（可關閉），並可由 AI 幫忙從本機清單挑 checkpoint。你也可以填「回饋」，讓 AI 在下一張自動調整。
+          Ollama 轉成英文提示詞（可關閉），並可由 AI 幫忙從本機清單挑 checkpoint。填「回饋」調整下一張時，會自動附上<strong>上一張成品圖</strong>給
+          AI 看（須先成功產過一張）；請選支援<strong>視覺</strong>的 Ollama 模型。
           預設會用角色<strong>第一張錨點圖</strong>走 img2img 鎖定外觀，再送本機
           <strong> ComfyUI </strong>出圖；可關閉回到純文字模式。請確認 Comfy 已開、且有可用 checkpoint。
         </p>
@@ -270,12 +284,12 @@ export function CharacterGeneratePanelWindow() {
       </label>
 
       <label className="chgen__label">
-        回饋（選填，讓 AI 決定下一張怎麼調整）
+        回饋（選填；有內容時會附上上一張成品圖給 AI，須先成功產過一張）
         <textarea
           className="chgen__textarea"
           value={feedbackZh}
           onChange={(e) => setFeedbackZh(e.target.value)}
-          placeholder="例：上一張臉太不像、鼻子太尖、背景太亂，希望更簡潔。"
+          placeholder="例：臉再像一點、背景簡潔、光線柔和一點。"
         />
       </label>
 

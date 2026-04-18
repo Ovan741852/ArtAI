@@ -1,4 +1,8 @@
 import { HttpPacket, HttpRequest } from '../http/types'
+import {
+  CREATIVE_LOOP_RESOURCE_REPLY_FALLBACK_ZH,
+  resolveTopLevelReplyZhFromPayload,
+} from './assistantUserReplyLine'
 
 export type CreativeLoopResourceKind = 'checkpoint' | 'lora' | 'vae' | 'other'
 
@@ -126,7 +130,7 @@ export class CreativeLoopResourceCheckRsp extends HttpPacket {
     this.data = {
       ollamaModel: typeof o.ollamaModel === 'string' ? o.ollamaModel : '',
       resolvedTemplateId: typeof o.resolvedTemplateId === 'string' ? o.resolvedTemplateId : '',
-      replyZh: typeof o.replyZh === 'string' ? o.replyZh : '',
+      replyZh: resolveTopLevelReplyZhFromPayload(o, CREATIVE_LOOP_RESOURCE_REPLY_FALLBACK_ZH, checklist[0]?.titleZh),
       checklist,
       localCheckpoints: readStringArray(o.localCheckpoints),
       noteZh: typeof o.noteZh === 'string' ? o.noteZh : '',

@@ -2,6 +2,7 @@ import type { ServerEnv } from '../config/env.js'
 import { applyWorkflowTemplatePatch } from './applyWorkflowTemplatePatch.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
 import { runComfyPromptToFirstPngBuffer } from './comfyPromptExecution.js'
+import { getLocalModelsDump } from './localModelsDump.js'
 import {
   setFirstLoadImageFilename,
   uploadImageToComfyui,
@@ -60,6 +61,42 @@ function parseReferenceImagePngBase64(rec: Record<string, unknown>): string | nu
 }
 
 /**
+ * 若模板白名單含 `ckpt_name` 且 ArtAI 能從 Comfy 取得非空 checkpoint 清單，則先比對，避免 Comfy 回難讀的 validation 錯誤。
+ */
+async function assertResolvedCkptNameOnComfy(
+  env: ServerEnv,
+  template: { whitelistParams: Record<string, { nodeId: string; inputKey: string }> },
+  wf: Record<string, { class_type: string; inputs: Record<string, unknown> }>,
+): Promise<void> {
+  const spec = template.whitelistParams.ckpt_name
+  if (!spec || typeof spec.nodeId !== 'string' || typeof spec.inputKey !== 'string') {
+    return
+  }
+  const node = wf[spec.nodeId]
+  if (!node?.inputs) return
+  const raw = node.inputs[spec.inputKey]
+  if (typeof raw !== 'string' || !raw.trim()) return
+  const ckpt = raw.trim()
+
+  const dump = await getLocalModelsDump(env, { force: false })
+  const src = dump.sources.comfyui
+  if (!src.ok || src.checkpoints.length === 0) {
+    return
+  }
+  if (new Set(src.checkpoints).has(ckpt)) {
+    return
+  }
+  const sorted = [...src.checkpoints].sort((a, b) => a.localeCompare(b))
+  const sample = sorted.slice(0, 8).join(', ')
+  const more = src.checkpoints.length > 8 ? ' …' : ''
+  throw new AppHttpError(
+    400,
+    `本機 ComfyUI 沒有名為「${ckpt}」的 checkpoint（與 models/checkpoints 內檔名需完全一致）。` +
+      `請在 patch 指定正確的 ckpt_name。目前可偵測的範例：${sample}${more}（共 ${String(src.checkpoints.length)} 個）。`,
+  )
+}
+
+/**
  * 讀模板、套用白名單 patch（可空）、送 Comfy 並取回第一張輸出 PNG。
  */
 export async function runWorkflowTemplateOnComfy(
@@ -99,6 +136,8 @@ export async function runWorkflowTemplateOnComfy(
       throw new AppHttpError(400, `參考圖處理失敗：${msg}`)
     }
   }
+
+  await assertResolvedCkptNameOnComfy(env, template, wf)
 
   const buf = await runComfyPromptToFirstPngBuffer({
     comfyuiBaseUrl: env.comfyuiBaseUrl,

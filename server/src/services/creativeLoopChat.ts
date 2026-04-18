@@ -4,6 +4,11 @@ import { AppHttpError } from './civitaiCheckpointSummary.js'
 import { getComfyObjectInfoCached } from './comfyuiObjectInfo.js'
 import { getLocalModelsDump } from './localModelsDump.js'
 import { ollamaGenerateNonStream } from './ollamaGenerate.js'
+import {
+  CREATIVE_LOOP_ASSISTANT_REPLY_FALLBACK_ZH,
+  readOptionalUnderstandingZh,
+  resolveAssistantReplyZh,
+} from '../lib/assistantLlmUserReply.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import {
   MAX_OLLAMA_VISION_IMAGES,
@@ -60,22 +65,18 @@ export type CreativeLoopChatResult = {
     | null
 }
 
-const MAX_MESSAGES = 24
+/** 送進 LLM 時最多保留的對話則數（逾則捨棄最舊，保留最新）。 */
+const MAX_MESSAGES = 64
+/** 請求裡 `messages` 陣列列數上限（含無效列），避免異常大 payload。 */
+const MAX_MESSAGE_ROWS = 400
 const MAX_CONTENT_LEN = 8000
-
-function readNonEmptyString(x: unknown, field: string): string {
-  if (typeof x !== 'string' || !x.trim()) {
-    throw new AppHttpError(502, `LLM JSON: "${field}" must be a non-empty string`)
-  }
-  return x.trim()
-}
 
 export function normalizeMessagesCreativeLoop(raw: unknown): CreativeLoopMessage[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new AppHttpError(400, 'Body field "messages" must be a non-empty array')
   }
-  if (raw.length > MAX_MESSAGES) {
-    throw new AppHttpError(400, `At most ${String(MAX_MESSAGES)} messages allowed`)
+  if (raw.length > MAX_MESSAGE_ROWS) {
+    throw new AppHttpError(400, `At most ${String(MAX_MESSAGE_ROWS)} message rows allowed`)
   }
   const out: CreativeLoopMessage[] = []
   for (const row of raw) {
@@ -94,6 +95,9 @@ export function normalizeMessagesCreativeLoop(raw: unknown): CreativeLoopMessage
   }
   if (out[out.length - 1]?.role !== 'user') {
     throw new AppHttpError(400, 'Last message must be from role "user"')
+  }
+  if (out.length > MAX_MESSAGES) {
+    return out.slice(-MAX_MESSAGES)
   }
   return out
 }
@@ -309,7 +313,7 @@ export async function runCreativeLoopChat(env: ServerEnv, bodyRaw: unknown): Pro
     '',
     'Task: respond to the LATEST user message. Output ONE JSON object only, no markdown, no commentary.',
     'Keys exactly:',
-    '- "replyZh": Traditional Chinese reply (concise, friendly, actionable).',
+    '- "replyZh": optional Traditional Chinese reply (concise, friendly, actionable); if omitted or blank, the server uses understandingZh or a default line.',
     '- "understandingZh": optional string — short restatement of what the user wants.',
     '- "proposedPatch": object — ONLY keys from the whitelist; values must match parameter types.',
     '  For whitelist params typed as string (e.g. scheduler, sampler_name, ckpt_name), use JSON strings (e.g. "normal", "euler"), never bare numbers.',
@@ -336,11 +340,12 @@ export async function runCreativeLoopChat(env: ServerEnv, bodyRaw: unknown): Pro
   }
 
   const o = parsed as Record<string, unknown>
-  const replyZh = readNonEmptyString(o.replyZh, 'replyZh')
-  const understandingZh =
-    typeof o.understandingZh === 'string' && o.understandingZh.trim()
-      ? o.understandingZh.trim().slice(0, 1200)
-      : undefined
+  const understandingZh = readOptionalUnderstandingZh(o.understandingZh)
+  const replyZh = resolveAssistantReplyZh({
+    replyRaw: o.replyZh,
+    understandingZh,
+    finalFallback: CREATIVE_LOOP_ASSISTANT_REPLY_FALLBACK_ZH,
+  })
 
   const proposedRaw = o.proposedPatch
   let proposedPatch: Record<string, unknown> =
