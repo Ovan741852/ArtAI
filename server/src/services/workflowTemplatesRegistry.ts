@@ -43,8 +43,19 @@ function directoryHasWorkflowJson(dir: string): boolean {
   }
 }
 
+/** 內建模板 bundle 以 `basic-txt2img.json` 為錨點（避免 cwd 下另有零散 json 卻不含 img2img 時誤用該目錄）。 */
+function dirHasBuiltinTxt2img(dir: string): boolean {
+  try {
+    fs.accessSync(path.join(dir, 'basic-txt2img.json'))
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
- * 預設為 `cwd/data/workflow-templates`；若該目錄無任何 `.json`（常見於從 `server/` 子目錄啟動），改試 `cwd/../data/workflow-templates`（repo 根之 `data/`）。
+ * 未設 `WORKFLOW_TEMPLATES_DIR` 時：依序找 `cwd/data/workflow-templates`、`cwd/../data/workflow-templates`；
+ * **優先**含 `basic-txt2img.json` 者；否則再退回「任一有 `.json`」的目錄（舊行為）。
  */
 export function resolveWorkflowTemplatesDir(): string {
   const raw = process.env.WORKFLOW_TEMPLATES_DIR?.trim()
@@ -54,6 +65,12 @@ export function resolveWorkflowTemplatesDir(): string {
   const cwd = process.cwd()
   const underCwd = path.resolve(cwd, 'data', 'workflow-templates')
   const underParent = path.resolve(cwd, '..', 'data', 'workflow-templates')
+  if (dirHasBuiltinTxt2img(underCwd)) {
+    return underCwd
+  }
+  if (dirHasBuiltinTxt2img(underParent)) {
+    return underParent
+  }
   if (directoryHasWorkflowJson(underCwd)) {
     return underCwd
   }

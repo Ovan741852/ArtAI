@@ -24,7 +24,7 @@
 
 ## Comfy Workflow 模板（ArtAI 內建）
 
-模板為伺服器工作目錄下 **`data/workflow-templates/*.json`**（與本機 checkpoint 目錄檔 `catalog` 分開）。未設 **`WORKFLOW_TEMPLATES_DIR`** 且工作目錄下該資料夾內**沒有任何** `*.json` 時，會再嘗試**上一層** `../data/workflow-templates`（方便從 `server/` 子目錄啟動仍讀到 repo 根目錄的模板）。可用 **`WORKFLOW_TEMPLATES_DIR`** 覆寫為絕對路徑。檔名須為 `{id}.json` 且 JSON 內 **`id`** 欄位與檔名一致。
+模板為伺服器工作目錄下 **`data/workflow-templates/*.json`**（與本機 checkpoint 目錄檔 `catalog` 分開）。未設 **`WORKFLOW_TEMPLATES_DIR`** 時，會在 **`cwd/data/workflow-templates`** 與 **`cwd/../data/workflow-templates`** 中**優先**選含 **`basic-txt2img.json`** 者（避免 cwd 下另有零散 `*.json` 卻不含內建 bundle 時誤用該目錄）；兩者皆無時再退回「任一有 `*.json`」之目錄。可用 **`WORKFLOW_TEMPLATES_DIR`** 覆寫為絕對路徑。檔名須為 `{id}.json` 且 JSON 內 **`id`** 欄位與檔名一致。
 
 | 方法 | 路徑 | 用途 |
 |------|------|------|

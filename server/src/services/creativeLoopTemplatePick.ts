@@ -34,7 +34,9 @@ export async function resolveCreativeLoopTemplate(body: Record<string, unknown>)
   }
 
   if (refCount > 0 && !ids.has('basic-img2img')) {
-    warnings.push('伺服器未提供 basic-img2img 模板，已改為文生圖；參考圖仍會送給 AI 閱讀。')
+    warnings.push(
+      `伺服器未載入 basic-img2img 模板（目前讀取目錄：${resolveWorkflowTemplatesDir()}），已改為文生圖；參考圖仍會送給 AI 閱讀。請確認該目錄有 basic-img2img.json，或設定 WORKFLOW_TEMPLATES_DIR 指向含此檔的資料夾。`,
+    )
   }
 
   if (!ids.has('basic-txt2img')) {
