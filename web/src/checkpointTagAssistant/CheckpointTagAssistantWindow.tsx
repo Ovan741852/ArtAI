@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { CheckpointNameTags } from '../components/checkpoint/CheckpointNameTags'
 import {
-  CheckpointTagAssistantChatReq,
-  CheckpointTagAssistantChatRsp,
   LocalModelsDumpReq,
   LocalModelsDumpRsp,
   OllamaModelsReq,
   OllamaModelsRsp,
   createDefaultHttpClient,
+  postCheckpointTagAssistantChatStream,
   type CheckpointTagAssistantMessage,
   type CheckpointTagAssistantOkData,
 } from '../net'
@@ -23,12 +22,42 @@ type PendingImage = {
   base64: string
 }
 
+type CivitaiRec = CheckpointTagAssistantOkData['recommendedModels'][number]
+
+type SearchHistoryEntry = {
+  id: string
+  /** ISO 8601 */
+  at: string
+  modelTags: string[]
+  searchQueries: string[]
+  recommendedModels: CivitaiRec[]
+}
+
+function newHistoryId(): string {
+  if (typeof globalThis.crypto !== 'undefined' && 'randomUUID' in globalThis.crypto) {
+    return globalThis.crypto.randomUUID()
+  }
+  return `${String(Date.now())}-${String(Math.random()).slice(2, 10)}`
+}
+
+function formatSearchTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'medium' })
+  } catch {
+    return iso
+  }
+}
+
 type ChatTurn = {
   role: 'user' | 'assistant'
   content: string
   /** 若為 true，之後送 API 時此則 user 改為空字串（僅該輪曾帶 imageBase64）。 */
   wasImageOnly?: boolean
   userImageDataUrl?: string
+  /** Ollama 串流中（尚未收到 final）。 */
+  streaming?: boolean
+  streamRaw?: string
   detail?: Pick<CheckpointTagAssistantOkData['assistant'], 'modelTags' | 'searchQueries'> & {
     recommendedModels: CheckpointTagAssistantOkData['recommendedModels']
   }
@@ -47,6 +76,7 @@ export function CheckpointTagAssistantWindow() {
   const [imageErr, setImageErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([])
 
   const [ollamaLoading, setOllamaLoading] = useState(true)
   const [ollamaError, setOllamaError] = useState<string | null>(null)
@@ -125,10 +155,12 @@ export function CheckpointTagAssistantWindow() {
   }, [refreshAll])
 
   const messagesForApi = useMemo((): CheckpointTagAssistantMessage[] => {
-    return turns.map((t) => {
-      if (t.role === 'user' && t.wasImageOnly) return { role: 'user', content: '' }
-      return { role: t.role, content: t.content }
-    })
+    return turns
+      .filter((t) => !(t.role === 'assistant' && t.streaming))
+      .map((t) => {
+        if (t.role === 'user' && t.wasImageOnly) return { role: 'user', content: '' }
+        return { role: t.role, content: t.content }
+      })
   }, [turns])
 
   const ingestImageFile = useCallback((file: File | null) => {
@@ -163,6 +195,17 @@ export function CheckpointTagAssistantWindow() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
 
+  /** 重置：清空對話、草稿、圖片與搜尋紀錄（與「清除對話」同一動作）。不變更已選 Ollama 模型。 */
+  const resetWorkspace = useCallback(() => {
+    setTurns([])
+    setDraft('')
+    setPendingImage(null)
+    setImageErr(null)
+    setChatError(null)
+    setSearchHistory([])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [])
+
   const send = useCallback(async () => {
     const text = draft.trim()
     const imgSnap = pendingImage
@@ -187,45 +230,65 @@ export function CheckpointTagAssistantWindow() {
         wasImageOnly,
         userImageDataUrl: imgSnap?.dataUrl,
       },
+      { role: 'assistant', content: '', streaming: true, streamRaw: '' },
     ])
     setSending(true)
 
-    const res = await client.sendRequest(
-      CheckpointTagAssistantChatReq.allocate(nextMessages, {
-        ollamaModel: ollamaPicked,
-        recommendLimit: 6,
-        imageBase64: imgB64 ?? undefined,
-      }),
-      CheckpointTagAssistantChatRsp,
-    )
-    setSending(false)
+    const streamBody: Record<string, unknown> = {
+      messages: nextMessages,
+      ollamaModel: ollamaPicked,
+      recommendLimit: 6,
+    }
+    if (imgB64) streamBody.imageBase64 = imgB64
 
-    if (!res.ok) {
-      setChatError(res.error.message)
-      setTurns((prev) => prev.slice(0, -1))
-      if (imgB64 && imgSnap) setPendingImage(imgSnap)
-      return
-    }
-    if (!res.data.ok || !res.data.data) {
-      setChatError(res.data.message || '助手回應異常')
-      setTurns((prev) => prev.slice(0, -1))
-      if (imgB64 && imgSnap) setPendingImage(imgSnap)
-      return
-    }
-    const d = res.data.data
-    setLocalRows(d.localCheckpoints)
-    setTurns((prev) => [
-      ...prev,
-      {
-        role: 'assistant',
-        content: d.assistant.replyZh,
-        detail: {
-          modelTags: d.assistant.modelTags,
-          searchQueries: d.assistant.searchQueries,
-          recommendedModels: d.recommendedModels,
+    try {
+      const out = await postCheckpointTagAssistantChatStream(streamBody, {
+        onDelta: (piece) => {
+          setTurns((prev) => {
+            const next = [...prev]
+            const i = next.length - 1
+            if (i < 0 || next[i].role !== 'assistant' || !next[i].streaming) return prev
+            next[i] = { ...next[i], streamRaw: (next[i].streamRaw ?? '') + piece }
+            return next
+          })
         },
-      },
-    ])
+        onFinal: (d) => {
+          setLocalRows(d.localCheckpoints)
+          setSearchHistory((hist) => [
+            {
+              id: newHistoryId(),
+              at: new Date().toISOString(),
+              modelTags: [...d.assistant.modelTags],
+              searchQueries: [...d.assistant.searchQueries],
+              recommendedModels: [...d.recommendedModels],
+            },
+            ...hist,
+          ])
+          setTurns((prev) => {
+            const next = [...prev]
+            const i = next.length - 1
+            if (i < 0 || next[i].role !== 'assistant' || !next[i].streaming) return prev
+            next[i] = {
+              role: 'assistant',
+              content: d.assistant.replyZh,
+              detail: {
+                modelTags: d.assistant.modelTags,
+                searchQueries: d.assistant.searchQueries,
+                recommendedModels: d.recommendedModels,
+              },
+            }
+            return next
+          })
+        },
+      })
+      if (!out.ok) {
+        setChatError(out.message)
+        setTurns((prev) => prev.slice(0, -2))
+        if (imgB64 && imgSnap) setPendingImage(imgSnap)
+      }
+    } finally {
+      setSending(false)
+    }
   }, [draft, messagesForApi, ollamaPicked, pendingImage, sending])
 
   const onDrop = useCallback(
@@ -246,9 +309,16 @@ export function CheckpointTagAssistantWindow() {
         Checkpoint 需求助手
       </h2>
       <p className="cta__lead">
-        用文字描述、或<strong>上傳一張參考圖</strong>；助手會用繁中回覆，並整理英文 Civitai 風格 tag 與熱門 checkpoint 參考。會一併參考你電腦上 Comfy 目錄裡的檔名與已同步的 tags。模型清單來自{' '}
+        用文字描述、或<strong>上傳一張參考圖</strong>；助手會用繁中回覆並整理英文 tag。每次送出後會依該輪 tag 搜尋 Civitai checkpoint，結果收錄在下方<strong>搜尋紀錄</strong>（附時間與關鍵字，方便多輪對照）。本機檔名來自 Comfy 目錄同步。模型清單來自{' '}
         <code className="cta__code">GET /ollama/models</code>。
       </p>
+
+      <div className="cta__toolbar">
+        <button type="button" className="cta__reset" disabled={sending} onClick={resetWorkspace}>
+          重置
+        </button>
+        <p className="cta__toolbar-hint">清空對話、草稿、待送圖片與搜尋紀錄；不會改變下方選定的 Ollama 模型。</p>
+      </div>
 
       <h3 className="cta__section-title">本機 checkpoints</h3>
       {dumpError ? <p className="cta__err">{dumpError}</p> : null}
@@ -284,49 +354,99 @@ export function CheckpointTagAssistantWindow() {
             key={`turn-${String(i)}`}
             className={`cta__bubble ${t.role === 'user' ? 'cta__bubble--user' : 'cta__bubble--assistant'}`}
           >
-            {t.content ? <div className="cta__bubble-text">{t.content}</div> : null}
-            {t.role === 'user' && t.userImageDataUrl ? (
-              <img className="cta__user-img" src={t.userImageDataUrl} alt="使用者上傳的參考圖" />
-            ) : null}
-            {t.role === 'assistant' && t.detail ? (
+            {t.role === 'user' ? (
               <>
-                <div className="cta__bubble-tags" aria-label="Suggested Civitai model tags (English)">
-                  {t.detail.modelTags.map((x) => (
-                    <span key={x} className="cta__bubble-tag">
-                      {x}
-                    </span>
-                  ))}
-                </div>
-                {t.detail.searchQueries.length > 0 ? (
-                  <p className="cta__local-meta" style={{ marginTop: 6 }}>
-                    Civitai name search: {t.detail.searchQueries.join(' · ')}
+                {t.content ? <div className="cta__bubble-text">{t.content}</div> : null}
+                {t.userImageDataUrl ? (
+                  <img className="cta__user-img" src={t.userImageDataUrl} alt="使用者上傳的參考圖" />
+                ) : null}
+              </>
+            ) : t.streaming ? (
+              <pre className="cta__stream-pre" aria-busy="true">
+                {t.streamRaw || '…'}
+              </pre>
+            ) : (
+              <>
+                {t.content ? <div className="cta__bubble-text">{t.content}</div> : null}
+                {t.detail ? (
+                  <>
+                    <div className="cta__bubble-tags" aria-label="Suggested Civitai model tags (English)">
+                      {t.detail.modelTags.map((x) => (
+                        <span key={x} className="cta__bubble-tag">
+                          {x}
+                        </span>
+                      ))}
+                    </div>
+                    {t.detail.searchQueries.length > 0 ? (
+                      <p className="cta__local-meta" style={{ marginTop: 6 }}>
+                        Civitai name search: {t.detail.searchQueries.join(' · ')}
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
+                {t.detail ? (
+                  <p className="cta__hist-inline">
+                    {t.detail.recommendedModels.length > 0
+                      ? '本輪 checkpoint 列表已收錄於下方「搜尋紀錄」。'
+                      : '本輪未找到符合的 checkpoint；可調整描述後再試，紀錄仍會留下該次 tag。'}
                   </p>
                 ) : null}
               </>
-            ) : null}
-            {t.role === 'assistant' && t.detail && t.detail.recommendedModels.length > 0 ? (
-              <div className="cta__rec">
-                <strong className="cta__section-title">Civitai 參考（熱門 Checkpoint）</strong>
-                {t.detail.recommendedModels.map((m) => (
-                  <div key={m.id} className="cta__rec-card">
-                    <CheckpointNameTags
-                      name={m.name}
-                      tags={m.tags}
-                      emptyHint="(no tags)"
-                      caption={
-                        <a href={m.civitaiUrl} target="_blank" rel="noreferrer">
-                          Civitai · #{m.id}
-                        </a>
-                      }
-                    />
-                    {m.descriptionText ? <p className="cta__rec-desc">{m.descriptionText}</p> : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
+            )}
           </div>
         ))}
       </div>
+
+      <h3 className="cta__section-title">Checkpoint 搜尋紀錄</h3>
+      <p className="cta__local-meta">依時間由新到舊；每筆標示該次使用的 model tags 與 name search 關鍵字。</p>
+      {searchHistory.length === 0 ? (
+        <p className="cta__lead">尚無紀錄。送出對話或圖片後會出現。</p>
+      ) : (
+        <div className="cta__hist-list">
+          {searchHistory.map((h) => (
+            <article key={h.id} className="cta__hist">
+              <header className="cta__hist-head">
+                <time className="cta__hist-time" dateTime={h.at}>
+                  {formatSearchTime(h.at)}
+                </time>
+              </header>
+              <div className="cta__hist-tags" aria-label="此筆搜尋使用的 model tags">
+                {h.modelTags.map((x, ti) => (
+                  <span key={`${h.id}-t-${String(ti)}-${x}`} className="cta__bubble-tag">
+                    {x}
+                  </span>
+                ))}
+              </div>
+              {h.searchQueries.length > 0 ? (
+                <p className="cta__hist-queries">
+                  <span className="cta__hist-queries-label">關鍵字搜尋</span> {h.searchQueries.join(' · ')}
+                </p>
+              ) : null}
+              {h.recommendedModels.length > 0 ? (
+                <div className="cta__rec">
+                  {h.recommendedModels.map((m) => (
+                    <div key={m.id} className="cta__rec-card">
+                      <CheckpointNameTags
+                        name={m.name}
+                        tags={m.tags}
+                        emptyHint="(no tags)"
+                        caption={
+                          <a href={m.civitaiUrl} target="_blank" rel="noreferrer">
+                            Civitai · #{m.id}
+                          </a>
+                        }
+                      />
+                      {m.descriptionText ? <p className="cta__rec-desc">{m.descriptionText}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="cta__muted">此輪無結果</p>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
 
       {chatError ? <p className="cta__err">{chatError}</p> : null}
 

@@ -1,4 +1,5 @@
 import type { ServerEnv } from '../config/env.js'
+import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
 import { mapCivitaiModelRow, type CivitaiModelRow } from './civitaiModelRowMap.js'
@@ -24,19 +25,6 @@ function normalizeDescriptions(input: string | string[]): string {
     return input.map((s) => String(s).trim()).filter(Boolean).join('\n\n')
   }
   return String(input).trim()
-}
-
-function readStringList(x: unknown, field: string, max: number): string[] {
-  if (x === undefined || x === null) return []
-  if (!Array.isArray(x)) throw new AppHttpError(502, `LLM JSON: "${field}" must be an array or omitted`)
-  const out: string[] = []
-  for (const el of x) {
-    if (typeof el !== 'string') continue
-    const t = el.trim()
-    if (t) out.push(t)
-    if (out.length >= max) break
-  }
-  return out
 }
 
 function downloadCount(item: CivitaiModelItem): number {
@@ -174,8 +162,8 @@ export async function runSuggestModelsFromDescriptions(
   }
 
   const o = parsed as Record<string, unknown>
-  const modelTags = readStringList(o.modelTags, 'modelTags', 5)
-  const searchQueries = readStringList(o.searchQueries, 'searchQueries', 3)
+  const modelTags = coerceLlmStringList(o.modelTags, 5)
+  const searchQueries = coerceLlmStringList(o.searchQueries, 3)
 
   if (modelTags.length === 0 && searchQueries.length === 0) {
     throw new AppHttpError(502, 'LLM returned no modelTags and no searchQueries')

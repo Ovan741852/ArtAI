@@ -1,11 +1,12 @@
 import { Buffer } from 'node:buffer'
 import type { ServerEnv } from '../config/env.js'
+import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
 import type { CivitaiModelRow } from './civitaiModelRowMap.js'
 import { mergeHotCivitaiModelsByTagsAndQueries } from './civitaiSuggestModelsFromDescriptions.js'
 import { getLocalModelsDump } from './localModelsDump.js'
-import { ollamaGenerateNonStream } from './ollamaGenerate.js'
+import { ollamaGenerateNonStream, ollamaGenerateStreamCollect } from './ollamaGenerate.js'
 
 export type CheckpointTagAssistantRole = 'user' | 'assistant'
 
@@ -48,6 +49,17 @@ export type CheckpointTagAssistantResult = {
   recommendedModels: CivitaiModelRow[]
 }
 
+export type PreparedCheckpointTagAssistantTurn = {
+  ollamaModel: string
+  imageAttached: boolean
+  imageB64: string | undefined
+  prompt: string
+  localCheckpoints: LocalCheckpointForAssistant[]
+  recommendLimit: number
+  perSearchLimit: number
+  nsfw: boolean
+}
+
 const MAX_MESSAGES = 24
 const MAX_CONTENT_LEN = 8000
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -57,7 +69,7 @@ function parseOptionalImageBase64(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined
   let s = raw.trim()
   if (!s) return undefined
-  const dataUrl = /^data:image\/[^;]+;base64,(.+)$/is.exec(s)
+  const dataUrl = /^data:image\/[^;]+;base64,(.+)$/i.exec(s)
   if (dataUrl) s = dataUrl[1].replace(/\s/g, '')
   else s = s.replace(/\s/g, '')
   try {
@@ -73,19 +85,6 @@ function parseOptionalImageBase64(raw: unknown): string | undefined {
     throw new AppHttpError(400, 'imageBase64 is not valid base64')
   }
   return s
-}
-
-function readStringList(x: unknown, field: string, max: number): string[] {
-  if (x === undefined || x === null) return []
-  if (!Array.isArray(x)) throw new AppHttpError(502, `LLM JSON: "${field}" must be an array or omitted`)
-  const out: string[] = []
-  for (const el of x) {
-    if (typeof el !== 'string') continue
-    const t = el.trim()
-    if (t) out.push(t)
-    if (out.length >= max) break
-  }
-  return out
 }
 
 function readNonEmptyString(x: unknown, field: string): string {
@@ -148,10 +147,13 @@ function formatTranscript(messages: CheckpointTagAssistantMessage[], imageAttach
     .join('\n\n---\n\n')
 }
 
-export async function runCheckpointTagAssistantChat(
+/**
+ * 驗證 body、讀 dump、組 prompt（供一般 JSON 與 NDJSON 串流共用）。
+ */
+export async function prepareCheckpointTagAssistantTurn(
   env: ServerEnv,
   body: CheckpointTagAssistantBody,
-): Promise<CheckpointTagAssistantResult> {
+): Promise<PreparedCheckpointTagAssistantTurn> {
   const imageB64 = parseOptionalImageBase64((body as Record<string, unknown>).imageBase64)
   const imageAttached = Boolean(imageB64)
   const messages = normalizeMessages(body.messages, imageAttached)
@@ -211,13 +213,26 @@ export async function runCheckpointTagAssistantChat(
     'Do not invent specific commercial model names as tags; prefer broad style/subject tags.',
   ].join('\n')
 
-  const raw = await ollamaGenerateNonStream({
-    ollamaBaseUrl: env.ollamaBaseUrl,
-    model: ollamaModel,
+  return {
+    ollamaModel,
+    imageAttached,
+    imageB64,
     prompt,
-    images: imageB64 ? [imageB64] : undefined,
-  })
+    localCheckpoints,
+    recommendLimit,
+    perSearchLimit,
+    nsfw,
+  }
+}
 
+export async function completeCheckpointTagAssistantFromLlmRaw(
+  raw: string,
+  env: ServerEnv,
+  prep: PreparedCheckpointTagAssistantTurn,
+): Promise<{
+  assistant: CheckpointTagAssistantResult['assistant']
+  recommendedModels: CivitaiModelRow[]
+}> {
   let parsed: unknown
   try {
     parsed = parseJsonObjectFromLlm(raw)
@@ -232,26 +247,83 @@ export async function runCheckpointTagAssistantChat(
 
   const o = parsed as Record<string, unknown>
   const replyZh = readNonEmptyString(o.replyZh, 'replyZh')
-  const modelTags = readStringList(o.modelTags, 'modelTags', 6)
-  const searchQueries = readStringList(o.searchQueries, 'searchQueries', 4)
+  const modelTags = coerceLlmStringList(o.modelTags, 6)
+  const searchQueries = coerceLlmStringList(o.searchQueries, 4)
 
   let recommendedModels: CivitaiModelRow[] = []
   if (modelTags.length > 0 || searchQueries.length > 0) {
     recommendedModels = await mergeHotCivitaiModelsByTagsAndQueries(env, {
       modelTags,
       searchQueries,
-      perSearchLimit,
-      resultLimit: recommendLimit,
+      perSearchLimit: prep.perSearchLimit,
+      resultLimit: prep.recommendLimit,
       types: 'Checkpoint',
-      nsfw,
+      nsfw: prep.nsfw,
     })
   }
 
   return {
-    ollamaModel,
-    imageAttached,
-    localCheckpoints,
     assistant: { replyZh, modelTags, searchQueries },
+    recommendedModels,
+  }
+}
+
+/**
+ * 串流 NDJSON：每行一個 JSON；`delta` 為 Ollama token；最後一行 `final` 含完整結果（與非串流 JSON 對齊）。
+ * 若已在外層呼叫 `prepareCheckpointTagAssistantTurn`，可傳 `prep` 避免重複讀 dump。
+ */
+export async function writeCheckpointTagAssistantChatStream(
+  env: ServerEnv,
+  body: CheckpointTagAssistantBody,
+  writeLine: (obj: unknown) => Promise<void>,
+  opts?: { signal?: AbortSignal; prep?: PreparedCheckpointTagAssistantTurn },
+): Promise<void> {
+  const prep = opts?.prep ?? (await prepareCheckpointTagAssistantTurn(env, body))
+
+  const raw = await ollamaGenerateStreamCollect({
+    ollamaBaseUrl: env.ollamaBaseUrl,
+    model: prep.ollamaModel,
+    prompt: prep.prompt,
+    images: prep.imageB64 ? [prep.imageB64] : undefined,
+    signal: opts?.signal,
+    onToken: async (chunk) => {
+      await writeLine({ type: 'delta', text: chunk })
+    },
+  })
+
+  const { assistant, recommendedModels } = await completeCheckpointTagAssistantFromLlmRaw(raw, env, prep)
+
+  await writeLine({
+    type: 'final',
+    ok: true,
+    ollamaModel: prep.ollamaModel,
+    imageAttached: prep.imageAttached,
+    localCheckpoints: prep.localCheckpoints,
+    assistant,
+    recommendedModels,
+  })
+}
+
+export async function runCheckpointTagAssistantChat(
+  env: ServerEnv,
+  body: CheckpointTagAssistantBody,
+): Promise<CheckpointTagAssistantResult> {
+  const prep = await prepareCheckpointTagAssistantTurn(env, body)
+
+  const raw = await ollamaGenerateNonStream({
+    ollamaBaseUrl: env.ollamaBaseUrl,
+    model: prep.ollamaModel,
+    prompt: prep.prompt,
+    images: prep.imageB64 ? [prep.imageB64] : undefined,
+  })
+
+  const { assistant, recommendedModels } = await completeCheckpointTagAssistantFromLlmRaw(raw, env, prep)
+
+  return {
+    ollamaModel: prep.ollamaModel,
+    imageAttached: prep.imageAttached,
+    localCheckpoints: prep.localCheckpoints,
+    assistant,
     recommendedModels,
   }
 }

@@ -40,6 +40,12 @@ export default defineConfig(({ mode }) => {
           target: artaiServerTarget,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              // 減少開發代理對串流／大 body 的壓縮與緩衝問題
+              proxyReq.setHeader('Accept-Encoding', 'identity')
+            })
+          },
         },
       },
     },
