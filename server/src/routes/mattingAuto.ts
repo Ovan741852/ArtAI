@@ -24,7 +24,14 @@ export function createMattingAutoRoutes(env: ServerEnv) {
     } catch (e) {
       if (e instanceof AppHttpError) {
         const code = e.status === 400 ? 400 : e.status === 500 ? 500 : 502
-        return c.json({ ok: false, message: e.message }, code)
+        const body: Record<string, unknown> = { ok: false, message: e.message }
+        const ex = e.extra
+        if (ex != null && typeof ex === 'object') {
+          for (const [k, v] of Object.entries(ex)) {
+            body[k] = v
+          }
+        }
+        return c.json(body, code)
       }
       const message = e instanceof Error ? e.message : String(e)
       return c.json({ ok: false, message }, 502)

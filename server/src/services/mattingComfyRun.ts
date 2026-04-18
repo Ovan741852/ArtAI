@@ -20,6 +20,15 @@ function getRequiredMapFromNodeDef(nodeDef: unknown): Record<string, unknown> {
   return req as Record<string, unknown>
 }
 
+function getOptionalMapFromNodeDef(nodeDef: unknown): Record<string, unknown> {
+  if (nodeDef == null || typeof nodeDef !== 'object') return {}
+  const input = (nodeDef as Record<string, unknown>).input
+  if (input == null || typeof input !== 'object') return {}
+  const opt = (input as Record<string, unknown>).optional
+  if (opt == null || typeof opt !== 'object') return {}
+  return opt as Record<string, unknown>
+}
+
 function findImageInputKey(required: Record<string, unknown>): string | null {
   for (const [k, spec] of Object.entries(required)) {
     if (Array.isArray(spec) && spec[0] === 'IMAGE') return k
@@ -116,20 +125,45 @@ function extractFirstOutputImage(
   return null
 }
 
+function extractExecutionErrorFromMessages(messages: unknown): string | null {
+  if (!Array.isArray(messages)) return null
+  for (const item of messages) {
+    if (!Array.isArray(item) || item.length < 2) continue
+    const kind = item[0]
+    if (kind !== 'execution_error' && kind !== 'execution_interrupted') continue
+    const payload = item[1]
+    if (payload != null && typeof payload === 'object') {
+      const ex = (payload as Record<string, unknown>).exception_message
+      if (typeof ex === 'string' && ex.trim()) return ex.trim().slice(0, 2000)
+      const nodeType = (payload as Record<string, unknown>).node_type
+      const errType = (payload as Record<string, unknown>).exception_type
+      const bits = [typeof nodeType === 'string' ? nodeType : '', typeof errType === 'string' ? errType : '']
+        .filter(Boolean)
+        .join(' ')
+      if (bits) return bits.slice(0, 2000)
+    }
+  }
+  return null
+}
+
 function readHistoryExecutionError(historyEntry: unknown): string | null {
   if (historyEntry == null || typeof historyEntry !== 'object') return null
   const status = (historyEntry as Record<string, unknown>).status
   if (status == null || typeof status !== 'object') return null
   const st = status as Record<string, unknown>
+  const fromMessages = extractExecutionErrorFromMessages(st.messages)
+  if (fromMessages) return fromMessages
   const statusStr = st.status_str
-  if (statusStr !== 'error') return null
-  const messages = st.messages
-  if (!Array.isArray(messages)) return 'ComfyUI execution error'
-  try {
-    return JSON.stringify(messages).slice(0, 800)
-  } catch {
-    return 'ComfyUI execution error'
+  if (statusStr === 'error') {
+    const messages = st.messages
+    if (!Array.isArray(messages)) return 'ComfyUI execution error'
+    try {
+      return JSON.stringify(messages).slice(0, 1200)
+    } catch {
+      return 'ComfyUI execution error'
+    }
   }
+  return null
 }
 
 async function comfyFetchHistoryEntry(base: string, promptId: string): Promise<unknown | null> {
@@ -195,14 +229,22 @@ export async function removeBackgroundViaComfy(params: {
   }
 
   const uploadedName = await comfyUploadImage(base, params.image)
-  const staticInputs = buildStaticInputsFromRequired(required as Record<string, unknown>, params.classification)
+  const optionalMat = getOptionalMapFromNodeDef(nodeDef)
+  const staticInputs = {
+    ...buildStaticInputsFromRequired(optionalMat as Record<string, unknown>, params.classification),
+    ...buildStaticInputsFromRequired(required as Record<string, unknown>, params.classification),
+  }
 
   const saveDef =
     params.objectInfo != null && typeof params.objectInfo === 'object'
       ? (params.objectInfo as Record<string, unknown>)['SaveImage']
       : undefined
   const saveRequired = getRequiredMapFromNodeDef(saveDef)
-  const saveStatic = buildStaticInputsFromRequired(saveRequired as Record<string, unknown>, params.classification)
+  const saveOptional = getOptionalMapFromNodeDef(saveDef)
+  const saveStatic = {
+    ...buildStaticInputsFromRequired(saveOptional as Record<string, unknown>, params.classification),
+    ...buildStaticInputsFromRequired(saveRequired as Record<string, unknown>, params.classification),
+  }
   delete saveStatic.images
   delete saveStatic.filename_prefix
 

@@ -80,6 +80,7 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
 
   const tried: string[] = []
   let lastMessage = ''
+  const attemptErrors: { step: string; error: string }[] = []
 
   for (const step of plan) {
     tried.push(stepLabel(step))
@@ -140,6 +141,7 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
       }
     } catch (e) {
       lastMessage = e instanceof Error ? e.message : String(e)
+      attemptErrors.push({ step: stepLabel(step), error: lastMessage })
       warnings.push(`${stepLabel(step)} 失敗：${lastMessage}`)
     }
   }
@@ -147,5 +149,10 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
   throw new AppHttpError(
     502,
     lastMessage ? `所有摳圖後端皆失敗（最後錯誤：${lastMessage}）` : '所有摳圖後端皆失敗',
+    {
+      warnings,
+      attemptErrors,
+      triedExecutors: tried,
+    },
   )
 }

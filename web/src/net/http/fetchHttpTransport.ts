@@ -23,9 +23,29 @@ export class FetchHttpTransport implements IHttpTransport {
         const rawText = await res.text()
         if (ct.includes('application/json') && rawText.trim()) {
           const j = JSON.parse(rawText) as unknown
-          if (j != null && typeof j === 'object' && 'message' in j) {
-            const m = (j as { message?: unknown }).message
+          if (j != null && typeof j === 'object') {
+            const o = j as Record<string, unknown>
+            const m = o.message
             if (typeof m === 'string' && m.trim()) detail = m.trim()
+            const parts: string[] = []
+            if (Array.isArray(o.warnings)) {
+              const w = o.warnings
+                .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+                .join('\n')
+              if (w) parts.push(w)
+            }
+            if (Array.isArray(o.attemptErrors)) {
+              for (const row of o.attemptErrors) {
+                if (row == null || typeof row !== 'object') continue
+                const r = row as Record<string, unknown>
+                const step = typeof r.step === 'string' ? r.step : ''
+                const err = typeof r.error === 'string' ? r.error : ''
+                if (step && err) parts.push(`${step}: ${err}`)
+              }
+            }
+            if (parts.length > 0) {
+              detail = `${detail}\n\n${parts.join('\n')}`.slice(0, 6000)
+            }
           }
         } else if (rawText.trim() && rawText.length < 400) {
           detail = rawText.trim().slice(0, 400)

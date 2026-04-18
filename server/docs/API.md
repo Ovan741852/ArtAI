@@ -88,7 +88,7 @@
 
 ### 模型套組採購助手（Ollama + Civitai）
 
-與 **Checkpoint 需求助手**分離：**不**附本機 checkpoint 清單；由 Ollama 產出 **1–3 組**採購向 stack，每組含 **一個 checkpoint 搜尋條件**與 **0–2 個 LoRA 搜尋條件**（皆為英文 `modelTags`／`searchQueries`），伺服器再依條件向 Civitai 合併搜尋（checkpoint 用 `types=Checkpoint`，LoRA 用 `types=LORA`），排序策略與 `suggest-from-descriptions` 相同（Most Downloaded + AllTime）。
+與 **Checkpoint 需求助手**分離：**不**附本機 checkpoint 清單；由 Ollama 產出 **1–3 組**採購向 stack，每組含 **一個 checkpoint 搜尋條件**與 **1–2 個 LoRA 搜尋條件**（皆為英文 `modelTags`／`searchQueries`；Ollama 若回傳空 `loras`，伺服器會依該組 checkpoint 的 tag／query **自動補上一筆** LoRA slot 再搜 Civitai），checkpoint 用 `types=Checkpoint`，LoRA 用 `types=LORA`，排序策略與 `suggest-from-descriptions` 相同（Most Downloaded + AllTime）。
 
 **Body（`POST …/chat` 與 `…/chat-stream` 相同）：**
 
@@ -106,7 +106,7 @@
 - `bundles`：陣列長度 **1–3**。每筆含：
   - `titleZh`、`noteZh`（選填，字串）
   - `checkpoint`：`modelTags`、`searchQueries`、`recommendedModels`（與 tag 助手推薦列相同精簡形狀之陣列）
-  - `loras`：陣列，元素同 `checkpoint` 欄位結構（搜尋結果為 LoRA）
+  - `loras`：陣列（至少一筆；可能含伺服器依 checkpoint 自動補的 slot），元素同 `checkpoint` 欄位結構（搜尋結果為 LoRA）
 
 **串流 `POST /civitai/model-bundles/assistant/chat-stream`：** 回應 **`Content-Type: application/x-ndjson`**。每行一個 JSON：① `{ "type": "delta", "text": "…" }`；② `{ "type": "final", "ok": true, … }` 欄位與非串流成功 JSON 一致；③ `{ "type": "error", "ok": false, "message": "…" }`。先驗證 body 失敗時仍回 **一般 JSON**（400／502）而非串流。
 
@@ -154,7 +154,7 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 
 **Comfy 偵測：** 伺服器讀取快取之 **`GET /comfy/object_info`** 同源資料；若節點型別名稱符合內建關鍵字（精細類：如 BiRefNet／isnet…；一般類：如 rembg／remove background…），且該節點在 `object_info` 之 **`input.required` 恰好一個 `IMAGE`**、其餘必填皆為可自動填之型別（`BOOLEAN`／`INT`／`FLOAT`／`STRING`／選項下拉），才會納入 Comfy 候選。**需要額外連線的型別**（例如 `rembg_session` 的 `ImageRemoveBackground+`）會排除，改試下一後端。節點名稱不含關鍵字者不會被選用（仍可走 Remove.bg 或本機 ONNX）。
 
-**錯誤：** Body 無效 **400**；無任何可用後端 **500**；所有候選皆失敗 **502**。
+**錯誤：** Body 無效 **400**；無任何可用後端 **500**；所有候選皆失敗 **502**（JSON 除 `message` 外可含 **`warnings`** 字串陣列、**`attemptErrors`**：`{ step, error }[]`、**`triedExecutors`** 字串陣列，方便客戶端顯示而不必讀 Comfy／Docker log）。
 
 | 方法 | 路徑 | 用途 |
 |------|------|------|

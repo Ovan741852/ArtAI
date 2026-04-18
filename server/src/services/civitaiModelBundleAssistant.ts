@@ -202,6 +202,25 @@ function parseBundleSpec(raw: unknown, index: number): ModelBundleSpec {
     if (slot.modelTags.length === 0 && slot.searchQueries.length === 0) continue
     loras.push(slot)
   }
+  if (loras.length === 0) {
+    const tags = checkpoint.modelTags.slice(0, MAX_TAGS_PER_SLOT)
+    const searches: string[] = []
+    for (const q of checkpoint.searchQueries) {
+      const t = q.trim()
+      if (t) searches.push(t.toLowerCase().includes('lora') ? t : `${t} lora`)
+      if (searches.length >= MAX_QUERIES_PER_SLOT) break
+    }
+    if (searches.length === 0 && checkpoint.modelTags[0]) {
+      searches.push(`${checkpoint.modelTags[0]} lora`)
+    }
+    if (searches.length === 0) {
+      searches.push('style lora')
+    }
+    loras.push({
+      modelTags: tags.length > 0 ? [...tags] : ['character'],
+      searchQueries: searches.slice(0, MAX_QUERIES_PER_SLOT),
+    })
+  }
   return { titleZh, noteZh, checkpoint, loras }
 }
 
@@ -260,11 +279,12 @@ export async function prepareModelBundleAssistantTurn(
     '  - "titleZh": short Traditional Chinese label for this stack (e.g. route A/B).',
     '  - "noteZh": optional one short Traditional Chinese sentence clarifying when to pick this stack.',
     '  - "checkpoint": object with "modelTags" (1-4 strings) and "searchQueries" (0-2 strings) — English only, for Civitai MODEL tag search and name search.',
-    '  - "loras": array length 0-2; each element same shape as checkpoint (English modelTags 1-4, searchQueries 0-2). Omit empty LoRA entries.',
+    '  - "loras": array length **1-2** (required). Each element same shape as checkpoint (English modelTags 1-4, searchQueries 0-2). At least one modelTag OR searchQuery per LoRA slot.',
+    '  - First LoRA: style / medium / composition (e.g. cel shading, photorealistic skin, lineart). Second LoRA (if any): character, object, or detail (e.g. eyes, fabric). Use Civitai-friendly English tags.',
     'Rules:',
     '- modelTags must be plausible Civitai MODEL tags in English (broad style/subject), not made-up commercial filenames.',
     '- Prefer distinct bundles when the user goal can be met multiple ways (e.g. anime vs semi-real).',
-    '- Keep LoRAs optional; 0 is fine if a strong checkpoint route alone is enough.',
+    '- Every bundle MUST list LoRAs that complement the checkpoint; do not return an empty "loras" array.',
   ].join('\n')
 
   return {

@@ -396,9 +396,9 @@ export function ModelBundleAssistantWindow() {
         模型套組採購助手
       </h2>
       <p className="mba__lead">
-        與「Checkpoint 需求助手」分開：此處一次整理最多三組「底模 Checkpoint + 可選 LoRA」的 Civitai
-        搜尋結果，方便依需求下載。左欄為對話與每輪套組標題；中欄輸入與參考圖；右欄為該輪快取結果（點左欄該輪不重打
-        API）。
+        與「Checkpoint 需求助手」分開：每組會列出 **Checkpoint + LoRA**（至少一筆 LoRA 候選；若模型沒填
+        `loras`，伺服器會依底模的英文 tag／關鍵字自動補一筆 LoRA 搜尋）。右欄為 Civitai 連結與描述，方便下載。
+        左欄為對話與每輪套組標題；中欄輸入與參考圖；點左欄該輪可切換快取（不重打 API）。
       </p>
 
       <div className="mba__grid">

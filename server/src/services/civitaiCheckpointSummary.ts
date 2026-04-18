@@ -5,12 +5,15 @@ import { pickCheckpointFromCivitaiItems, stemFileName, type CheckpointPickQualit
 import { ollamaGenerateNonStream } from './ollamaGenerate.js'
 
 export class AppHttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
+  /**
+   * 選填；例如摳圖全失敗時附 `attemptErrors`、`warnings` 供客戶端不必看伺服器 log。
+   */
+  readonly extra?: Record<string, unknown>
+
+  constructor(readonly status: number, message: string, extra?: Record<string, unknown>) {
     super(message)
     this.name = 'AppHttpError'
+    this.extra = extra
   }
 }
 

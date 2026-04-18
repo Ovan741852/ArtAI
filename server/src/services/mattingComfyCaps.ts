@@ -5,6 +5,9 @@ export type MattingComfyCandidate = {
   tier: MattingComfyTier
 }
 
+/** 已知無法由 ArtAI 單線自動串接之節點（仍可能出現在 object_info）。 */
+const MATTING_CLASS_BLOCKLIST = new Set<string>(['ImageRemoveBackground+'])
+
 const FINE_RE =
   /birefnet|rmbg|isnet|modnet|human.?matte|portrait.?matte|silueta|u2net_human|inspyrenet|dis.?bg|disbg/i
 
@@ -26,6 +29,7 @@ export function listMattingComfyCandidates(objectInfo: unknown): MattingComfyCan
   const keys = Object.keys(objectInfo as Record<string, unknown>)
   const out: MattingComfyCandidate[] = []
   for (const classType of keys) {
+    if (MATTING_CLASS_BLOCKLIST.has(classType)) continue
     const tier = tierForClassType(classType)
     if (!tier) continue
     out.push({ classType, tier })
