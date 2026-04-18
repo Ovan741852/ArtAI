@@ -6,7 +6,8 @@
 }
 
 .cta-panel,
-.mba-panel {
+.mba-panel,
+.mat-panel {
   box-sizing: border-box;
   flex: 1 1 auto;
   width: 100%;

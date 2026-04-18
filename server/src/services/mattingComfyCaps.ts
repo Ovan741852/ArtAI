@@ -48,27 +48,43 @@ function getRequiredMap(nodeDef: unknown): Record<string, InputFieldSpec> {
   return req as Record<string, InputFieldSpec>
 }
 
-function countImageInputs(required: Record<string, InputFieldSpec>): number {
-  let n = 0
+/**
+ * 僅當 `input.required` 內 **恰好一個 IMAGE**（由我們接 LoadImage），其餘必填欄位皆為我們能自動填的值型別時，
+ * 才允許自動串 `LoadImage → 節點 → SaveImage`。
+ *
+ * 否則會出現 Comfy 驗證錯誤（例如 `ImageRemoveBackground+` 需要 `rembg_session` 等自訂型別連線）。
+ */
+function isSimpleAutomatableMattingNode(required: Record<string, InputFieldSpec>): boolean {
+  let imageInputs = 0
   for (const spec of Object.values(required)) {
-    if (Array.isArray(spec) && spec[0] === 'IMAGE') n += 1
-  }
-  return n
-}
+    if (!Array.isArray(spec) || spec.length < 1) return false
+    const head = spec[0]
 
-function hasBlockedRequired(required: Record<string, InputFieldSpec>): boolean {
-  for (const spec of Object.values(required)) {
-    if (!Array.isArray(spec) || spec.length < 1) continue
-    const t = spec[0]
-    if (t === 'LATENT' || t === 'MASK' || t === 'MODEL') return true
+    if (head === 'IMAGE') {
+      imageInputs += 1
+      continue
+    }
+
+    if (head === 'LATENT' || head === 'MASK' || head === 'MODEL') return false
+
+    if (head === 'BOOLEAN' || head === 'INT' || head === 'FLOAT' || head === 'STRING') continue
+
+    if (Array.isArray(head)) {
+      const options = head.filter((x): x is string => typeof x === 'string')
+      if (options.length > 0) continue
+      return false
+    }
+
+    // 未知型別字串（如 REMBG_SESSION、CUSTOM、CLIP_VISION 等）無法自動接線
+    return false
   }
-  return false
+
+  return imageInputs === 1
 }
 
 export function canWireSimpleImageMatting(nodeDef: unknown): boolean {
   const required = getRequiredMap(nodeDef)
-  if (hasBlockedRequired(required)) return false
-  return countImageInputs(required) === 1
+  return isSimpleAutomatableMattingNode(required)
 }
 
 export function firstImageOutputSlot(nodeDef: unknown): number {

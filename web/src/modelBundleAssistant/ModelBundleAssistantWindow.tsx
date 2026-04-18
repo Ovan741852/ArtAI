@@ -423,8 +423,11 @@ export function ModelBundleAssistantWindow() {
               </p>
             ) : null}
             {turns.map((t, i) => {
-              const isPickableAssistant = t.role === 'assistant' && !t.streaming && t.detail?.historyId
-              const isSelectedTurn = Boolean(t.detail?.historyId && t.detail.historyId === selectedHistoryId)
+              const assistantDetail = t.role === 'assistant' ? t.detail : undefined
+              const isPickableAssistant = t.role === 'assistant' && !t.streaming && Boolean(assistantDetail?.historyId)
+              const isSelectedTurn = Boolean(
+                assistantDetail?.historyId && assistantDetail.historyId === selectedHistoryId,
+              )
               return (
                 <div
                   key={`mba-turn-${String(i)}`}
@@ -441,24 +444,24 @@ export function ModelBundleAssistantWindow() {
                     <MbaStreamingBody raw={t.streamRaw ?? ''} />
                   ) : (
                     <>
-                      {t.detail ? (
+                      {assistantDetail ? (
                         <div
                           className={`mba__pick-turn${isPickableAssistant ? ' mba__pick-turn--active' : ''}`}
                           role={isPickableAssistant ? 'button' : undefined}
                           tabIndex={isPickableAssistant ? 0 : undefined}
-                          onClick={() => pickTurnHistory(t.detail?.historyId)}
+                          onClick={() => pickTurnHistory(assistantDetail.historyId)}
                           onKeyDown={(e) => {
                             if (!isPickableAssistant) return
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault()
-                              pickTurnHistory(t.detail?.historyId)
+                              pickTurnHistory(assistantDetail.historyId)
                             }
                           }}
                           aria-label={isPickableAssistant ? '在右欄查看此輪套組結果' : undefined}
                         >
                           <ul className="mba__bundle-titles">
-                            {t.detail.bundles.map((b, j) => (
-                              <li key={`${t.detail?.historyId ?? 'x'}-b-${String(j)}`}>{b.titleZh}</li>
+                            {assistantDetail.bundles.map((b, j) => (
+                              <li key={`${assistantDetail.historyId}-b-${String(j)}`}>{b.titleZh}</li>
                             ))}
                           </ul>
                           {isPickableAssistant ? <p className="mba__pick-hint">點此區可在右欄查看該輪快取。</p> : null}

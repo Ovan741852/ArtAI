@@ -1,4 +1,56 @@
 /**
+ * 部分模型會在「字串外」寫成 `{\"key\": \"value\"}`（把 `\"` 當成引號），合法 JSON 應為 `{"key": "value"}`。
+ * 在雙引號字串**外**，若見 `\\` 後接 `"`，則略過反斜線只保留 `"` 並進入字串狀態。
+ */
+function stripErroneousBackslashBeforeQuoteOutsideStrings(input: string): string {
+  const out: string[] = []
+  let i = 0
+  let inStr = false
+  let esc = false
+  while (i < input.length) {
+    const c = input[i]!
+    if (esc) {
+      out.push(c)
+      esc = false
+      i += 1
+      continue
+    }
+    if (inStr) {
+      if (c === '\\') {
+        out.push(c)
+        esc = true
+        i += 1
+        continue
+      }
+      if (c === '"') {
+        out.push(c)
+        inStr = false
+        i += 1
+        continue
+      }
+      out.push(c)
+      i += 1
+      continue
+    }
+    if (c === '\\' && input[i + 1] === '"') {
+      out.push('"')
+      inStr = true
+      i += 2
+      continue
+    }
+    if (c === '"') {
+      out.push(c)
+      inStr = true
+      i += 1
+      continue
+    }
+    out.push(c)
+    i += 1
+  }
+  return out.join('')
+}
+
+/**
  * 移除 JSON 中「物件／陣列尾端多餘的逗號」（僅在字串外），不處理單引號或其它語法。
  * LLM 常產出 `{"a":[1,],}` 或 `{"a":1,}` 導致 `JSON.parse` 失敗。
  */
@@ -73,15 +125,16 @@ export function parseJsonObjectFromLlm(text: string): unknown {
   }
 
   const slice = t.slice(start, end + 1)
+  const repaired = stripTrailingCommasOutsideStrings(stripErroneousBackslashBeforeQuoteOutsideStrings(slice))
   try {
     return JSON.parse(slice) as unknown
   } catch (e1) {
     try {
-      return JSON.parse(stripTrailingCommasOutsideStrings(slice)) as unknown
+      return JSON.parse(repaired) as unknown
     } catch (e2) {
       const m1 = e1 instanceof Error ? e1.message : String(e1)
       const m2 = e2 instanceof Error ? e2.message : String(e2)
-      throw new Error(`${m1} (after trailing-comma repair: ${m2})`)
+      throw new Error(`${m1} (after LLM JSON repair: ${m2})`)
     }
   }
 }

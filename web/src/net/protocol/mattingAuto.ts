@@ -67,10 +67,12 @@ export class MattingAutoRsp extends HttpPacket {
       const chosenReasonZh = o.chosenReasonZh
       const triedExecutors = o.triedExecutors
       const imagePngBase64 = o.imagePngBase64
+      const executorOk =
+        chosenExecutor === 'comfy' || chosenExecutor === 'remove_bg' || chosenExecutor === 'local_onnx'
       if (
+        executorOk &&
         classification != null &&
         typeof classification === 'object' &&
-        typeof chosenExecutor === 'string' &&
         typeof chosenReasonZh === 'string' &&
         Array.isArray(triedExecutors) &&
         typeof imagePngBase64 === 'string' &&
@@ -83,7 +85,7 @@ export class MattingAutoRsp extends HttpPacket {
         this.ok = true
         this.data = {
           classification: { primarySubject, edgeDifficulty, preferQualityOverSpeed },
-          chosenExecutor: chosenExecutor as MattingAutoOkData['chosenExecutor'],
+          chosenExecutor,
           chosenReasonZh,
           triedExecutors: triedExecutors.filter((x): x is string => typeof x === 'string'),
           comfyNodeType: typeof o.comfyNodeType === 'string' || o.comfyNodeType === null ? (o.comfyNodeType as string | null) : null,

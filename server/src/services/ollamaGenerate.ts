@@ -7,6 +7,8 @@ function buildGenerateBody(params: {
   prompt: string
   stream: boolean
   images?: string[]
+  /** Ollama `format`：例如 `"json"` 可約束輸出為合法 JSON（見 Ollama generate API）。 */
+  format?: string
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: params.model,
@@ -16,6 +18,9 @@ function buildGenerateBody(params: {
   const imgs = params.images?.filter((s) => typeof s === 'string' && s.trim() !== '')
   if (imgs && imgs.length > 0) {
     body.images = imgs
+  }
+  if (params.format?.trim()) {
+    body.format = params.format.trim()
   }
   return body
 }
@@ -29,6 +34,7 @@ export async function ollamaGenerateNonStream(params: {
    * @see https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-completion
    */
   images?: string[]
+  format?: string
 }): Promise<string> {
   const base = params.ollamaBaseUrl.replace(/\/+$/, '')
   const url = `${base}/api/generate`
@@ -36,7 +42,7 @@ export async function ollamaGenerateNonStream(params: {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(buildGenerateBody({ ...params, stream: false })),
+    body: JSON.stringify(buildGenerateBody({ ...params, stream: false, format: params.format })),
   })
 
   const bodyText = await res.text()
@@ -69,6 +75,7 @@ export async function ollamaGenerateStreamCollect(params: {
   model: string
   prompt: string
   images?: string[]
+  format?: string
   onToken?: (chunk: string) => void | Promise<void>
   signal?: AbortSignal
 }): Promise<string> {
@@ -78,7 +85,7 @@ export async function ollamaGenerateStreamCollect(params: {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(buildGenerateBody({ ...params, stream: true })),
+    body: JSON.stringify(buildGenerateBody({ ...params, stream: true, format: params.format })),
     signal: params.signal,
   })
 

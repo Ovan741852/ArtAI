@@ -152,7 +152,7 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 - `imagePngBase64`：結果 **PNG**（透明背景），純 base64、**無** data URL 前綴。
 - `warnings`：字串陣列（例如後端失敗改試下一個時的提示）。
 
-**Comfy 偵測：** 伺服器讀取快取之 **`GET /comfy/object_info`** 同源資料；若節點型別名稱符合內建關鍵字（精細類：如 BiRefNet／isnet…；一般類：如 rembg／remove background…），且該節點在 `object_info` 中可 **單一 `IMAGE` 輸入** 自動串 `LoadImage → 節點 → SaveImage`，才會納入 Comfy 候選。若你的自訂節點名稱不含關鍵字，將不會被自動選用（仍可走 Remove.bg 或本機 ONNX）。
+**Comfy 偵測：** 伺服器讀取快取之 **`GET /comfy/object_info`** 同源資料；若節點型別名稱符合內建關鍵字（精細類：如 BiRefNet／isnet…；一般類：如 rembg／remove background…），且該節點在 `object_info` 之 **`input.required` 恰好一個 `IMAGE`**、其餘必填皆為可自動填之型別（`BOOLEAN`／`INT`／`FLOAT`／`STRING`／選項下拉），才會納入 Comfy 候選。**需要額外連線的型別**（例如 `rembg_session` 的 `ImageRemoveBackground+`）會排除，改試下一後端。節點名稱不含關鍵字者不會被選用（仍可走 Remove.bg 或本機 ONNX）。
 
 **錯誤：** Body 無效 **400**；無任何可用後端 **500**；所有候選皆失敗 **502**。
 

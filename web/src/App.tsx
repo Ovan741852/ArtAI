@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react'
 import { CheckpointTagAssistantWindow } from './checkpointTagAssistant/CheckpointTagAssistantWindow'
 import { ModelBundleAssistantWindow } from './modelBundleAssistant/ModelBundleAssistantWindow'
 import { LocalModelsDumpWindow } from './localModelsDump/LocalModelsDumpWindow'
+import { MattingPanelWindow } from './mattingPanel/MattingPanelWindow'
 import { DemoEchoReq, DemoEchoRsp, createDefaultHttpClient } from './net'
 import { useHelloStore } from './store/useHelloStore'
 
@@ -50,6 +51,9 @@ function App() {
       </section>
       <section className="mba-panel" aria-label="模型套組採購助手">
         <ModelBundleAssistantWindow />
+      </section>
+      <section className="mat-panel" aria-label="摳圖">
+        <MattingPanelWindow />
       </section>
       <div className="hello hello--tools">
         <LocalModelsDumpWindow />

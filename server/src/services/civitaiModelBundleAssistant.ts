@@ -252,7 +252,7 @@ export async function prepareModelBundleAssistantTurn(
     formatTranscript(messages, imageAttached),
     '',
     'Task: respond to the LATEST user message (and attached image if any). Output ONE JSON object only, no markdown, no commentary.',
-    'JSON rules: double quotes for all keys and string values only; no trailing commas after the last array/object element; no comments; escape double quotes inside strings as \\".',
+    'JSON must be strict RFC 8259: no trailing commas, no markdown code fences, no text before the opening {.',
     'Keys exactly:',
     '- "replyZh": Traditional Chinese, SHORT (max ~120 characters worth of prose): friendly next step, no long tutorials. Do NOT explain ControlNet install or long toolchains.',
     '- "bundles": array length 1-3. Each bundle is ONE alternative stack the user could download.',
@@ -358,6 +358,7 @@ export async function writeModelBundleAssistantChatStream(
     ollamaBaseUrl: env.ollamaBaseUrl,
     model: prep.ollamaModel,
     prompt: prep.prompt,
+    format: 'json',
     images: prep.imageB64 ? [prep.imageB64] : undefined,
     signal: opts?.signal,
     onToken: async (chunk) => {
@@ -384,6 +385,7 @@ export async function runModelBundleAssistantChat(
     ollamaBaseUrl: env.ollamaBaseUrl,
     model: prep.ollamaModel,
     prompt: prep.prompt,
+    format: 'json',
     images: prep.imageB64 ? [prep.imageB64] : undefined,
   })
 
