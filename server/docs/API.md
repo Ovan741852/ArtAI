@@ -30,7 +30,7 @@
 |------|------|------|
 | `GET` | `/workflows/templates` | 列出模板摘要：`templates[]` 每筆含 `id`、`titleZh`、`descriptionZh`、`tags`、`requiredPacks`、`whitelistKeys`。 |
 | `GET` | `/workflows/templates/:id` | 單一模板。成功時 `human`（繁中與標籤）與 `machine`（`templateId`、`whitelistParams`、`workflow`；`workflow` 為 Comfy API **`prompt`** 形狀：`{ [nodeId]: { class_type, inputs } }`）。未知 `id` 時 **404**。 |
-| `POST` | `/workflows/templates/:id/run` | **執行模板**：讀取 `id` 對應 JSON，將 **`patch`** 依白名單套入預設 `workflow` 後送 **ComfyUI** `/prompt`，輪詢至第一張輸出圖。Body：`patch`（選填，物件，可為 `{}` 表示全用模板預設）、`timeoutMs`（選填，毫秒，預設 **600000**，範圍 **10000–1800000**）。成功時 `ok: true`、`imagePngBase64`（PNG 純 base64、**無** data URL 前綴）、`patchApply`（`{ ok: true, appliedKeys, ignoredKeys }`）。`patch` 含非白名單鍵時仍會被忽略；型別不符等套用失敗時 **400**。Comfy 失敗或逾時 **502**。需設定 `COMFYUI_BASE_URL`／`COMFYUI_HOST`。 |
+| `POST` | `/workflows/templates/:id/run` | **執行模板**：讀取 `id` 對應 JSON，將 **`patch`** 依白名單套入預設 `workflow` 後送 **ComfyUI** `/prompt`，輪詢至第一張輸出圖。Body：`patch`（選填，物件，可為 `{}`）、`timeoutMs`（選填，毫秒，預設 **600000**，範圍 **10000–1800000**）、**`referenceImagePngBase64`**（選填）：有值時解碼並 **`POST /upload/image`** 上傳至 Comfy，再將 workflow 中**第一個** `LoadImage` 節點之 `inputs.image` 設為回傳檔名（供 **`basic-img2img`** 等）；可含 data URL 前綴，規則同摳圖 API；模板不含 `LoadImage` 時傳此欄位為 **400**。成功時 `ok: true`、`imagePngBase64`（PNG 純 base64、**無** data URL 前綴）、`patchApply`（`{ ok: true, appliedKeys, ignoredKeys }`）。`patch` 含非白名單鍵時仍會被忽略；型別不符等套用失敗時 **400**。Comfy 失敗或逾時 **502**。需設定 `COMFYUI_BASE_URL`／`COMFYUI_HOST`。 |
 
 ---
 
@@ -187,30 +187,44 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 
 ---
 
-## 創意閉環（規劃層）
+## 創意閉環（規劃層 + 資源盤點）
 
-獨立於 **Checkpoint 需求助手**／**模型套組採購助手** 的 **文字需求 →（可選）多張參考圖 → AI 規劃 Comfy 模板 patch** 流程；**生圖執行**請另呼叫 **`POST /workflows/templates/:id/run`**。內部重用 **Ollama**、**workflow 模板**、**`applyWorkflowTemplatePatch` 白名單邏輯**（與 Workflow 助手同源），不重複實作 patch 引擎。
+獨立於 **Checkpoint 需求助手**／**模型套組採購助手**。**模板選擇**：未傳 **`selectedTemplateId`** 時，伺服器依「是否有使用者參考圖（僅 `imageBase64`／`imageBase64s`，不含 `lastOutputPngBase64`）」自動選 **`basic-img2img`**（有圖且伺服器有該模板）或 **`basic-txt2img`**；缺 img2img 模板時改走文生圖並於 **`warnings`** 附註。**生圖**請呼叫 **`POST /workflows/templates/:id/run`**；圖生圖時建議 body 帶 **`referenceImagePngBase64`**（與規劃時同一張參考圖即可）。
 
 | 方法 | 路徑 | 用途 |
 |------|------|------|
-| `POST` | `/images/creative-loop/chat` | 單次 JSON：依 **`selectedTemplateId`** 讀模板白名單，附本機 checkpoint 清單與 **`GET /comfy/object_info` 快取摘要**，由 Ollama（**`format: json`**）產出繁中 **`replyZh`** 與 **`proposedPatch`**，並回傳 **`resolvedWorkflow`**／**`patchApply`**。 |
+| `POST` | `/images/creative-loop/chat` | 單次 JSON：讀模板白名單、附本機 checkpoint 與 **`object_info` 摘要**，Ollama **`format: json`** 產 **`replyZh`**、**`proposedPatch`**、**`resolvedWorkflow`**／**`patchApply`**。 |
+| `POST` | `/images/creative-loop/resource-check` | **第二段**：依對話與 **`proposedPatch`** 產出資源 **checklist**（繁中 + **`browseUrl`** 連至 Civitai 搜尋）；**`hasLocal`** 僅對 **`kind: checkpoint`** 且 **`filename`** 與本機 Comfy checkpoint 清單**完全相符**時為 `true`；**LoRA／VAE** 本階段無本機檔案清單比對，**一律 `hasLocal: false`**（見回傳 **`noteZh`**）。 |
+
+### `POST /images/creative-loop/chat`
 
 **Body：**
 
-- `messages`（必填）：`{ role: "user" \| "assistant", content: string }[]`；最後一則須為 **`user`**；**每一則 `content` 皆須為非空字串**（**不可**僅靠附圖送空文字，避免目標飄移）。
-- `selectedTemplateId`（必填）：小寫 id（`[a-z0-9-]+`），須為已存在模板；無效時 **404**。
-- `ollamaModel`（選填）：未傳則使用 `OLLAMA_SUMMARY_MODEL`；須能處理 **`format: json`** 與（若有附圖）**視覺**輸入。
-- `imageBase64`（選填）、`imageBase64s`（選填）：與 **Checkpoint 需求助手**相同合併規則、每張解碼後 **8 MB**、合併後最多 **6** 張。
-- `lastOutputPngBase64`（選填）：上一張生成之 **PNG** base64（可含 `data:image/...;base64,` 前綴）；解碼規則與單張參考圖相同。伺服器將其 **附在參考圖陣列之後** 一併送 Ollama `images`，並在內部英文規劃 prompt 標示為 **LAST_OUTPUT** 供模型對照。**若參考圖已滿 6 張則不可再附**，否則 **400**。
-- 多張參考圖與上一張成品是否皆被視覺模型有效利用，**依 Ollama 模型與版本而定**。
+- `messages`（必填）：`{ role: "user" \| "assistant", content: string }[]`；最後一則須為 **`user`**；**每一則 `content` 皆須為非空字串**（**不可**僅靠附圖送空文字）。
+- `selectedTemplateId`（選填）：小寫 id；有傳則**覆寫**自動選擇；未知模板 **404**。
+- `ollamaModel`（選填）：未傳則使用 `OLLAMA_SUMMARY_MODEL`。
+- `imageBase64`、`imageBase64s`：與 **Checkpoint 需求助手**相同（合併、每張 8 MB、最多 6 張）。
+- `lastOutputPngBase64`（選填）：附於參考圖之後送 Ollama；已滿 6 張參考圖時不可再附 **400**。
+- 多圖是否皆被視覺模型利用，**依 Ollama 模型與版本而定**。
 
-**成功 JSON：** `ok: true` 外加 `ollamaModel`、`selectedTemplateId`、`templateTitleZh`、`localCheckpoints`、`templates`（與 **`GET /workflows/templates`** 列表相同摘要形狀）、`objectInfoSummary`（與 **`POST /workflows/assistant/chat`** 相同）、**`attachedImageCount`**（實際送入 Ollama 的張數，含上一張成品）、`assistant`（`replyZh`、`understandingZh?`、`proposedPatch`）、`resolvedWorkflow`（patch 套用成功時為 prompt 圖，否則 `null`）、`patchApply`（成功 `{ ok: true, appliedKeys, ignoredKeys }` 或失敗 `{ ok: false, message }`）。
+**成功 JSON：** `ok: true` 外加 `ollamaModel`、**`selectedTemplateId`**（實際使用之模板）、**`runMode`**（`txt2img` \| `img2img`）、**`templateRouteZh`**（繁中短語）、**`warnings`**（字串陣列）、`templateTitleZh`、`localCheckpoints`、`templates`、`objectInfoSummary`、**`attachedImageCount`**、`assistant`、`resolvedWorkflow`、`patchApply`。
+
+### `POST /images/creative-loop/resource-check`
+
+**Body：**
+
+- `messages`（必填）：格式同 chat；**最後一則須為 `user`**（前端應在規劃後附上「請盤點資源」類使用者句）。
+- `resolvedTemplateId`（必填）：須與上一輪 chat 回傳之 **`selectedTemplateId`** 一致（已存在模板）。
+- `proposedPatch`（必填）：物件，通常為上一輪 **`assistant.proposedPatch`**。
+- `ollamaModel`（選填）。
+
+**成功 JSON：** `ok: true`、`ollamaModel`、`resolvedTemplateId`、**`replyZh`**（繁中簡介）、**`checklist`**（陣列，每筆含 **`id`**（UUID）、**`kind`**（`checkpoint` \| `lora` \| `vae` \| `other`）、**`titleZh`**、**`filename`**（可 `null`）、**`modelTags`**、**`searchQueries`**、**`detailZh`**、**`hasLocal`**、**`browseUrl`**）、`localCheckpoints`、`noteZh`（繁中說明 LoRA/VAE 比對限制）。
 
 ---
 
 ## 角色庫（本機索引 + 參考圖檔）
 
-用於建立「同一人物」的參考圖集合：**第一張成功入庫的圖為錨點**（`images[0]`），之後加圖會與錨點做身分延續審查。資料為伺服器工作目錄下 **索引 JSON**（預設 `data/character-library/index.json`）與 **圖檔目錄**（預設 `data/character-library/files/`）。本階段**不**包含依角色生圖。
+用於建立「同一人物」的參考圖集合：**第一張成功入庫的圖為錨點**（`images[0]`），之後加圖會與錨點做身分延續審查。資料為伺服器工作目錄下 **索引 JSON**（預設 `data/character-library/index.json`）與 **圖檔目錄**（預設 `data/character-library/files/`）。另提供 **文生圖試作**：將角色庫內之 **`summaryZh`／`profileEn`** 與使用者 **`prompt`** 合併後，走內建模板 **`basic-txt2img`** 送本機 **ComfyUI** 執行（需 Comfy 可連線且已安裝對應 checkpoint）。
 
 **Ollama：** gate 與 profile 皆呼叫本機 **`/api/generate`**（`format: json`）；請使用支援**視覺**的模型（與摳圖／Checkpoint 助手相同慣例）。`ollamaModel` 省略時使用 `OLLAMA_SUMMARY_MODEL`。
 
@@ -232,7 +246,26 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 | `GET` | `/characters/:id` | 詳情；未知 id **404**。 |
 | `POST` | `/characters/:id/images` | 加一張參考圖：`imageBase64`（必填）、`ollamaModel`（選填）。身分 gate 未通過時 **422**（欄位同上）。 |
 | `POST` | `/characters/:id/profile/refresh` | 依目前最多 **6** 張參考圖（由錨點起算）請 Ollama 產出 **`profileEn`（英文結構化物件）** 與 **`summaryZh`**（繁中摘要）並寫回索引。Body 可為空物件或 `{ "ollamaModel"?: string }`。無圖時 **400**。 |
+| `POST` | `/characters/:id/generations/txt2img` | **試作文生圖**：讀取該角色之 `profile`（可為空），將使用者 **`prompt`**（可繁中）與角色摘要合併；預設先以 **Ollama**（`useOllamaExpansion` 未設為 `false` 時）產出**英文**正向提示詞，失敗則改為字串備援；再以模板 **`basic-txt2img`** 送 **ComfyUI** 並回傳 **PNG base64**（無 data URL 前綴）。未知角色 **404**；Comfy／模板錯誤 **502**；參數錯誤 **400**。 |
 | `GET` | `/characters/:id/images/:imageId/file` | 回傳已存圖檔 bytes，`Content-Type` 為 `image/jpeg`／`image/png`／`image/webp`。 |
+
+**`POST /characters/:id/generations/txt2img` Body（皆在 JSON 物件內）：**
+
+- `prompt`（必填）：使用者想畫的內容（繁中或英文皆可）。
+- `checkpoint`（選填）：Comfy `models/checkpoints` 檔名；省略時使用 **`GET /comfy/checkpoints` 第一筆**（若清單為空則 **502**，請改傳 `checkpoint`）。
+- `autoCheckpointByAi`（選填布林）：預設 `true`。為 `true` 且未指定 `checkpoint` 時，會請 Ollama 根據角色資料、提示詞與回饋，從本機 checkpoint 清單挑選；挑選失敗才退回第一筆。
+- `negative`（選填）：負向提示；省略時使用伺服器預設英文負向句。
+- `steps`（選填，整數）、`cfg`（選填，數字）、`width`／`height`（選填，整數）、`seed`（選填，整數；負值或省略則隨機）。
+- `sampler_name`、`scheduler`（選填字串）：對應模板白名單鍵。
+- `timeoutMs`（選填）：同 **`POST /workflows/templates/:id/run`**，**10000–1800000**。
+- `useOllamaExpansion`（選填布林）：`false` 時略過 Ollama 擴寫，改以字串備援合併角色欄位與 `prompt`。
+- `ollamaModel`（選填）：擴寫用；省略時使用 `OLLAMA_SUMMARY_MODEL`。
+- `feedbackZh`（選填字串）：對上一張結果的回饋（繁中）；若提供，AI 會嘗試同時調整 checkpoint 選擇、`prompt` 追加詞與部分參數（在安全範圍內）。
+- `previousCheckpointUsed`（選填字串）：上一輪實際用到的 checkpoint（可幫助 AI 在回饋調整時比較前後策略）。
+- `identityMode`（選填字串）：`"anchor_img2img"`（預設）或 `"text_only"`。`anchor_img2img` 會把角色第一張錨點圖上傳至 Comfy，走 `LoadImage -> VAEEncode -> KSampler(denoise)`，通常較能維持同一人外觀。
+- `denoise`（選填數字）：僅 `anchor_img2img` 生效，範圍建議 `0~1`（伺服器會夾住）。越低越貼近錨點、越高越自由；預設 `0.58`。
+
+**成功 JSON：** `ok: true`、`imagePngBase64`、`positiveFinalEn`、`negativeUsed`、`checkpointUsed`、`checkpointDecisionZh`（本次 checkpoint 來源/理由）、`feedbackApplied`（是否有套用回饋策略）、`ollamaExpansionUsed`、`messageZh`（繁中短說明）、`patchApply`（與 **`POST /workflows/templates/:id/run`** 相同形狀）。
 
 **詳情 `character` 形狀（`GET /characters/:id` 與各 POST 成功時）：**
 

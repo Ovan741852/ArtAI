@@ -1,0 +1,139 @@
+/* 角色文生圖試作 BEM：chgen__ */
+
+.chgen {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(960px, 100%);
+  margin: 0 auto;
+  padding: 22px clamp(16px, 2.5vw, 28px) 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.chgen__head {
+  margin: 0 0 16px;
+}
+
+.chgen__title {
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+  color: var(--text-h);
+}
+
+.chgen__lead {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.chgen__grid {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+@media (min-width: 720px) {
+  .chgen__grid--2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.chgen__label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.chgen__input,
+.chgen__textarea,
+.chgen__select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.chgen__textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.chgen__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.chgen__btn {
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--text-h);
+  color: var(--bg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chgen__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chgen__err {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #c0392b 12%, transparent);
+  color: var(--text-h);
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+
+.chgen__ok {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.chgen__result {
+  margin-top: 16px;
+}
+
+.chgen__result img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.chgen__mono {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.78rem;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chgen__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+}

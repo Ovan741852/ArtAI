@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { CheckpointNameTags } from '../components/checkpoint/CheckpointNameTags'
 import {
   CreativeLoopChatReq,
   CreativeLoopChatRsp,
+  CreativeLoopResourceCheckReq,
+  CreativeLoopResourceCheckRsp,
   OllamaModelsReq,
   OllamaModelsRsp,
   WorkflowTemplateRunReq,
   WorkflowTemplateRunRsp,
-  WorkflowTemplatesListReq,
-  WorkflowTemplatesListRsp,
   createDefaultHttpClient,
   type CreativeLoopChatMessage,
-  type WorkflowTemplateListItem,
+  type CreativeLoopResourceChecklistItem,
 } from '../net'
 
 import './creativeLoopPanel.css'
@@ -43,11 +44,21 @@ function randomId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+function kindLabelZh(kind: CreativeLoopResourceChecklistItem['kind']): string {
+  switch (kind) {
+    case 'checkpoint':
+      return 'Checkpoint'
+    case 'lora':
+      return 'LoRA'
+    case 'vae':
+      return 'VAE'
+    default:
+      return '其他'
+  }
+}
+
 export function CreativeLoopPanelWindow() {
   const fileRef = useRef<HTMLInputElement>(null)
-  const [templates, setTemplates] = useState<WorkflowTemplateListItem[]>([])
-  const [templatesErr, setTemplatesErr] = useState<string | null>(null)
-  const [templateId, setTemplateId] = useState('')
 
   const [ollamaLoading, setOllamaLoading] = useState(true)
   const [ollamaErr, setOllamaErr] = useState<string | null>(null)
@@ -61,6 +72,16 @@ export function CreativeLoopPanelWindow() {
   const [messages, setMessages] = useState<CreativeLoopChatMessage[]>([])
   const [lastProposedPatch, setLastProposedPatch] = useState<Record<string, unknown> | null>(null)
   const [lastReplyZh, setLastReplyZh] = useState<string | null>(null)
+  const [planWarnings, setPlanWarnings] = useState<string[]>([])
+  const [templateRouteZh, setTemplateRouteZh] = useState<string | null>(null)
+
+  const [plannedTemplateId, setPlannedTemplateId] = useState<string | null>(null)
+
+  const [resourceCheckReady, setResourceCheckReady] = useState(false)
+  const [resourceReplyZh, setResourceReplyZh] = useState<string | null>(null)
+  const [resourceNoteZh, setResourceNoteZh] = useState<string | null>(null)
+  const [checklist, setChecklist] = useState<CreativeLoopResourceChecklistItem[]>([])
+  const [checklistChecked, setChecklistChecked] = useState<Record<string, boolean>>({})
 
   const [awaitRating, setAwaitRating] = useState(false)
   const [lastOutputBase64, setLastOutputBase64] = useState<string | null>(null)
@@ -74,30 +95,15 @@ export function CreativeLoopPanelWindow() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  const allChecklistChecked = useMemo(() => {
+    if (checklist.length === 0) return false
+    return checklist.every((it) => checklistChecked[it.id] === true)
+  }, [checklist, checklistChecked])
+
   const revokeResultUrl = useCallback(() => {
     setResultUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev)
       return null
-    })
-  }, [])
-
-  const loadTemplates = useCallback(async () => {
-    setTemplatesErr(null)
-    const res = await client.sendRequest(WorkflowTemplatesListReq.allocate(), WorkflowTemplatesListRsp)
-    if (!res.ok) {
-      setTemplatesErr(res.error.message)
-      return
-    }
-    if (!res.data.ok || !res.data.data) {
-      setTemplatesErr(res.data.message || '無法載入模板')
-      return
-    }
-    const list = res.data.data.templates
-    setTemplates(list)
-    setTemplateId((prev) => {
-      if (prev && list.some((t) => t.id === prev)) return prev
-      const basic = list.find((t) => t.id === 'basic-txt2img')
-      return basic?.id ?? list[0]?.id ?? ''
     })
   }, [])
 
@@ -120,9 +126,8 @@ export function CreativeLoopPanelWindow() {
   }, [])
 
   useEffect(() => {
-    void loadTemplates()
     void loadOllama()
-  }, [loadTemplates, loadOllama])
+  }, [loadOllama])
 
   const ingestFiles = useCallback((files: FileList | File[]) => {
     setErr(null)
@@ -184,6 +189,14 @@ export function CreativeLoopPanelWindow() {
     setMessages([])
     setLastProposedPatch(null)
     setLastReplyZh(null)
+    setPlanWarnings([])
+    setTemplateRouteZh(null)
+    setPlannedTemplateId(null)
+    setResourceCheckReady(false)
+    setResourceReplyZh(null)
+    setResourceNoteZh(null)
+    setChecklist([])
+    setChecklistChecked({})
     setAwaitRating(false)
     setLastOutputBase64(null)
     setRequirement('')
@@ -200,10 +213,6 @@ export function CreativeLoopPanelWindow() {
       setErr('請先填寫文字需求（必填）。')
       return
     }
-    if (!templateId) {
-      setErr('請選擇一個生圖模板。')
-      return
-    }
     if (awaitRating) {
       setErr('請先完成上一張圖的評價，再繼續，以免浪費調整方向。')
       return
@@ -212,7 +221,7 @@ export function CreativeLoopPanelWindow() {
     setErr(null)
     const nextMessages: CreativeLoopChatMessage[] = [...messages, { role: 'user', content: text }]
     const res = await client.sendRequest(
-      CreativeLoopChatReq.allocate(nextMessages, templateId, {
+      CreativeLoopChatReq.allocate(nextMessages, {
         ollamaModel: ollamaPicked || undefined,
         imageBase64s: refs.map((r) => r.base64),
         lastOutputPngBase64: attachLastToNextAi && lastOutputBase64 ? lastOutputBase64 : null,
@@ -232,10 +241,17 @@ export function CreativeLoopPanelWindow() {
     setMessages([...nextMessages, { role: 'assistant', content: d.assistant.replyZh }])
     setLastReplyZh(d.assistant.replyZh)
     setLastProposedPatch(d.assistant.proposedPatch)
+    setPlannedTemplateId(d.selectedTemplateId || null)
+    setTemplateRouteZh(d.templateRouteZh || null)
+    setPlanWarnings(d.warnings ?? [])
     setRequirement('')
+    setResourceCheckReady(false)
+    setResourceReplyZh(null)
+    setResourceNoteZh(null)
+    setChecklist([])
+    setChecklistChecked({})
   }, [
     requirement,
-    templateId,
     awaitRating,
     messages,
     ollamaPicked,
@@ -244,25 +260,66 @@ export function CreativeLoopPanelWindow() {
     lastOutputBase64,
   ])
 
-  const runGenerate = useCallback(async () => {
-    if (!templateId) {
-      setErr('請選擇模板。')
+  const runResourceCheck = useCallback(async () => {
+    if (!plannedTemplateId || lastProposedPatch == null) {
+      setErr('請先完成「先問 AI」取得建議。')
       return
     }
     if (awaitRating) {
       setErr('請先完成上一張圖的評價。')
       return
     }
-    if (lastProposedPatch === null) {
-      const ok = window.confirm(
-        '尚未執行「先問 AI」，將以模板預設參數生圖（可能與你的文字需求無關）。要繼續嗎？',
-      )
-      if (!ok) return
+    setBusy(true)
+    setErr(null)
+    const triggerContent =
+      '請列出執行上述生圖建議所需的 Checkpoint、LoRA、VAE 等資源清單（繁中標題；checkpoint 盡量給精確 .safetensors 檔名；其他給英文 tags／搜尋字）。'
+    const triggerMessages: CreativeLoopChatMessage[] = [...messages, { role: 'user', content: triggerContent }]
+    const res = await client.sendRequest(
+      CreativeLoopResourceCheckReq.allocate(triggerMessages, plannedTemplateId, lastProposedPatch, {
+        ollamaModel: ollamaPicked || undefined,
+      }),
+      CreativeLoopResourceCheckRsp,
+    )
+    setBusy(false)
+    if (!res.ok) {
+      setErr(res.error.message)
+      return
+    }
+    if (!res.data.ok || !res.data.data) {
+      setErr(res.data.message || '資源盤點失敗')
+      return
+    }
+    const d = res.data.data
+    setMessages([...triggerMessages, { role: 'assistant', content: d.replyZh }])
+    setResourceReplyZh(d.replyZh)
+    setResourceNoteZh(d.noteZh)
+    setChecklist(d.checklist)
+    const init: Record<string, boolean> = {}
+    for (const it of d.checklist) {
+      init[it.id] = it.hasLocal
+    }
+    setChecklistChecked(init)
+    setResourceCheckReady(true)
+  }, [plannedTemplateId, lastProposedPatch, awaitRating, messages, ollamaPicked])
+
+  const runGenerate = useCallback(async () => {
+    if (!plannedTemplateId) {
+      setErr('請先「先問 AI」取得模板與建議。')
+      return
+    }
+    if (!resourceCheckReady || !allChecklistChecked) {
+      setErr('請先完成「盤點資源（問 AI）」，並勾選清單上每一項（表示已備妥或已確認）。')
+      return
+    }
+    if (awaitRating) {
+      setErr('請先完成上一張圖的評價。')
+      return
     }
     setBusy(true)
     setErr(null)
+    const refB64 = plannedTemplateId === 'basic-img2img' && refs[0]?.base64 ? refs[0].base64 : undefined
     const res = await client.sendRequest(
-      WorkflowTemplateRunReq.allocate(templateId, lastProposedPatch ?? {}),
+      WorkflowTemplateRunReq.allocate(plannedTemplateId, lastProposedPatch ?? {}, undefined, refB64 ?? null),
       WorkflowTemplateRunRsp,
     )
     setBusy(false)
@@ -283,7 +340,7 @@ export function CreativeLoopPanelWindow() {
     setAwaitRating(true)
     setSelectedTags(new Set())
     setFeedbackText('')
-  }, [templateId, awaitRating, lastProposedPatch, revokeResultUrl])
+  }, [plannedTemplateId, resourceCheckReady, allChecklistChecked, awaitRating, lastProposedPatch, refs, revokeResultUrl])
 
   const submitRating = useCallback(() => {
     if (!awaitRating) return
@@ -308,186 +365,269 @@ export function CreativeLoopPanelWindow() {
     })
   }, [])
 
+  const toggleChecklist = useCallback((id: string) => {
+    setChecklistChecked((prev) => ({ ...prev, [id]: !prev[id] }))
+  }, [])
+
+  const generateDisabled =
+    busy || awaitRating || !plannedTemplateId || !resourceCheckReady || !allChecklistChecked
+
   return (
-    <div className="cloop">
-      <h2 className="cloop__title">創意閉環（實驗）</h2>
-      <p className="cloop__lead">
-        先寫清楚需求（必填）→ 可附多張參考圖 → 用「先問 AI」取得調整建議 → 再「依建議生圖」。生圖後請先評價再進下一輪，方便接續調整。
-      </p>
+    <div className="cloop cloop--layout">
+      <div className="cloop__main">
+        <h2 className="cloop__title">創意閉環（實驗）</h2>
+        <p className="cloop__lead">
+          填寫需求（必填）→ 可附參考圖（有圖時伺服器自動走圖生圖模板）→「先問 AI」→「盤點資源」在右欄確認
+          Checkpoint／LoRA／VAE → 清單<strong>全部勾選</strong>後才能「依建議生圖」。生圖後請先評價再進下一輪。
+        </p>
 
-      <div className="cloop__toolbar">
-        <button type="button" onClick={clearSession} disabled={busy}>
-          中止並清空
-        </button>
-      </div>
+        <div className="cloop__toolbar">
+          <button type="button" onClick={clearSession} disabled={busy}>
+            中止並清空
+          </button>
+        </div>
 
-      <div className="cloop__row">
-        <div className="cloop__field">
-          <label htmlFor="cloop-template">生圖模板</label>
-          <select
-            id="cloop-template"
-            value={templateId}
-            onChange={(e) => setTemplateId(e.target.value)}
-            disabled={busy || templates.length === 0}
-          >
-            {templates.length === 0 ? <option value="">（無可用模板）</option> : null}
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.titleZh} ({t.id})
-              </option>
+        <div className="cloop__row">
+          <div className="cloop__field">
+            <label htmlFor="cloop-ollama">Ollama 模型</label>
+            <select
+              id="cloop-ollama"
+              value={ollamaPicked}
+              onChange={(e) => setOllamaPicked(e.target.value)}
+              disabled={busy || ollamaLoading || ollamaNames.length === 0}
+            >
+              {ollamaNames.length === 0 ? <option value="">（無模型）</option> : null}
+              {ollamaNames.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            {ollamaErr ? <span className="cloop__err">{ollamaErr}</span> : null}
+          </div>
+        </div>
+
+        {templateRouteZh ? (
+          <p className="cloop__hint" role="status">
+            本輪路線：<strong>{templateRouteZh}</strong>
+            {plannedTemplateId ? `（${plannedTemplateId}）` : ''}
+          </p>
+        ) : null}
+        {planWarnings.length > 0 ? (
+          <ul className="cloop__hint">
+            {planWarnings.map((w) => (
+              <li key={w}>{w}</li>
             ))}
-          </select>
-          {templatesErr ? <span className="cloop__err">{templatesErr}</span> : null}
-        </div>
-        <div className="cloop__field">
-          <label htmlFor="cloop-ollama">Ollama 模型</label>
-          <select
-            id="cloop-ollama"
-            value={ollamaPicked}
-            onChange={(e) => setOllamaPicked(e.target.value)}
-            disabled={busy || ollamaLoading || ollamaNames.length === 0}
-          >
-            {ollamaNames.length === 0 ? <option value="">（無模型）</option> : null}
-            {ollamaNames.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          {ollamaErr ? <span className="cloop__err">{ollamaErr}</span> : null}
-        </div>
-      </div>
+          </ul>
+        ) : null}
 
-      <label className="cloop__label" htmlFor="cloop-req">
-        文字需求（必填）
-      </label>
-      <textarea
-        id="cloop-req"
-        className="cloop__req"
-        value={requirement}
-        onChange={(e) => setRequirement(e.target.value)}
-        placeholder="例：想要黃昏海邊、人物在畫面左側、整體偏暖色、電影感構圖……"
-        disabled={busy || awaitRating}
-      />
-      <p className="cloop__hint">僅附圖而不寫需求無法送出，避免目標飄移。</p>
-
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        multiple
-        hidden
-        onChange={(e) => {
-          if (e.target.files?.length) ingestFiles(e.target.files)
-          e.target.value = ''
-        }}
-      />
-      <div
-        className={`cloop__drop${dragOver ? ' cloop__drop--active' : ''}`}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        onClick={() => fileRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            fileRef.current?.click()
-          }
-        }}
-      >
-        拖放參考圖到這裡，或點擊多選檔案（最多 {String(MAX_REF)} 張，每張小於 8 MB）
-      </div>
-
-      {refs.length > 0 ? (
-        <div className="cloop__thumbs">
-          {refs.map((r) => (
-            <div key={r.id} className="cloop__thumb">
-              <img src={r.dataUrl} alt="" />
-              <button type="button" className="cloop__thumb-remove" onClick={() => removeRef(r.id)} aria-label="移除">
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {lastOutputBase64 ? (
-        <label className="cloop__tag" style={{ marginBottom: 12 }}>
-          <input
-            type="checkbox"
-            checked={attachLastToNextAi}
-            onChange={(e) => setAttachLastToNextAi(e.target.checked)}
-            disabled={busy}
-          />
-          下一輪「先問 AI」時附上上一張成品給 AI 對照
+        <label className="cloop__label" htmlFor="cloop-req">
+          文字需求（必填）
         </label>
-      ) : null}
+        <textarea
+          id="cloop-req"
+          className="cloop__req"
+          value={requirement}
+          onChange={(e) => setRequirement(e.target.value)}
+          placeholder="例：想要黃昏海邊、人物在畫面左側、整體偏暖色、電影感構圖……"
+          disabled={busy || awaitRating}
+        />
+        <p className="cloop__hint">僅附圖而不寫需求無法送出，避免目標飄移。</p>
 
-      <div className="cloop__actions cloop__actions--primary">
-        <button type="button" onClick={() => void askAi()} disabled={busy || awaitRating || !templateId}>
-          先問 AI
-        </button>
-        <button type="button" onClick={() => void runGenerate()} disabled={busy || awaitRating || !templateId}>
-          依建議生圖
-        </button>
-      </div>
-
-      {awaitRating ? (
-        <div className="cloop__warn" role="status">
-          已生成圖片：請先勾選標籤（可複選）並可填短句，按「送出評價」後才能再問 AI 或生圖。
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) ingestFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+        <div
+          className={`cloop__drop${dragOver ? ' cloop__drop--active' : ''}`}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragOver(true)
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          onClick={() => fileRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              fileRef.current?.click()
+            }
+          }}
+        >
+          拖放參考圖到這裡，或點擊多選檔案（最多 {String(MAX_REF)} 張，每張小於 8 MB）
         </div>
-      ) : null}
 
-      {err ? <div className="cloop__err">{err}</div> : null}
-
-      {lastReplyZh ? (
-        <div className="cloop__reply">
-          <strong>AI 說明</strong>
-          {'\n'}
-          {lastReplyZh}
-        </div>
-      ) : null}
-
-      {resultUrl ? (
-        <div className="cloop__result">
-          <p className="cloop__label">結果預覽</p>
-          <img src={resultUrl} alt="生成結果" />
-        </div>
-      ) : null}
-
-      {awaitRating ? (
-        <div className="cloop__rating">
-          <div className="cloop__label">哪裡想調整？（可複選）</div>
-          <div className="cloop__tags">
-            {FEEDBACK_TAGS.map((t) => (
-              <label key={t.id} className="cloop__tag">
-                <input type="checkbox" checked={selectedTags.has(t.id)} onChange={() => toggleTag(t.id)} />
-                {t.label}
-              </label>
+        {refs.length > 0 ? (
+          <div className="cloop__thumbs">
+            {refs.map((r) => (
+              <div key={r.id} className="cloop__thumb">
+                <img src={r.dataUrl} alt="" />
+                <button type="button" className="cloop__thumb-remove" onClick={() => removeRef(r.id)} aria-label="移除">
+                  ×
+                </button>
+              </div>
             ))}
           </div>
-          <label className="cloop__label" htmlFor="cloop-fb-text">
-            補充一句話（選填）
+        ) : null}
+
+        {lastOutputBase64 ? (
+          <label className="cloop__tag" style={{ marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              checked={attachLastToNextAi}
+              onChange={(e) => setAttachLastToNextAi(e.target.checked)}
+              disabled={busy}
+            />
+            下一輪「先問 AI」時附上上一張成品給 AI 對照
           </label>
-          <textarea
-            id="cloop-fb-text"
-            value={feedbackText}
-            onChange={(e) => setFeedbackText(e.target.value)}
-            placeholder="例：希望人物再大一点、背景再簡單……"
-          />
-          <button type="button" onClick={submitRating} disabled={selectedTags.size === 0 && !feedbackText.trim()}>
-            送出評價
+        ) : null}
+
+        <div className="cloop__actions cloop__actions--primary">
+          <button type="button" onClick={() => void askAi()} disabled={busy || awaitRating}>
+            先問 AI
           </button>
-          {selectedTags.size === 0 && !feedbackText.trim() ? (
-            <p className="cloop__hint">請至少勾選一個標籤，或填寫補充說明。</p>
-          ) : null}
+          <button
+            type="button"
+            onClick={() => void runResourceCheck()}
+            disabled={busy || awaitRating || !plannedTemplateId || lastProposedPatch == null}
+          >
+            盤點資源（問 AI）
+          </button>
+          <button type="button" onClick={() => void runGenerate()} disabled={generateDisabled}>
+            依建議生圖
+          </button>
         </div>
-      ) : null}
+
+        {awaitRating ? (
+          <div className="cloop__warn" role="status">
+            已生成圖片：請先勾選標籤（可複選）並可填短句，按「送出評價」後才能再問 AI 或生圖。
+          </div>
+        ) : null}
+
+        {err ? <div className="cloop__err">{err}</div> : null}
+
+        {lastReplyZh ? (
+          <div className="cloop__reply">
+            <strong>AI 說明</strong>
+            {'\n'}
+            {lastReplyZh}
+          </div>
+        ) : null}
+
+        {resultUrl ? (
+          <div className="cloop__result">
+            <p className="cloop__label">結果預覽</p>
+            <img src={resultUrl} alt="生成結果" />
+          </div>
+        ) : null}
+
+        {awaitRating ? (
+          <div className="cloop__rating">
+            <div className="cloop__label">哪裡想調整？（可複選）</div>
+            <div className="cloop__tags">
+              {FEEDBACK_TAGS.map((t) => (
+                <label key={t.id} className="cloop__tag">
+                  <input type="checkbox" checked={selectedTags.has(t.id)} onChange={() => toggleTag(t.id)} />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+            <label className="cloop__label" htmlFor="cloop-fb-text">
+              補充一句話（選填）
+            </label>
+            <textarea
+              id="cloop-fb-text"
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              placeholder="例：希望人物再大一点、背景再簡單……"
+            />
+            <button type="button" onClick={submitRating} disabled={selectedTags.size === 0 && !feedbackText.trim()}>
+              送出評價
+            </button>
+            {selectedTags.size === 0 && !feedbackText.trim() ? (
+              <p className="cloop__hint">請至少勾選一個標籤，或填寫補充說明。</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <aside className="cloop__aside" aria-label="資源 checklist">
+        <h3 className="cloop__aside-title">資源 checklist</h3>
+        <p className="cloop__aside-lead">
+          完成「先問 AI」後按「盤點資源」。請逐項勾選表示已備妥；缺檔可點連結到 Civitai 搜尋。
+        </p>
+        {resourceReplyZh ? (
+          <div className="cloop__reply cloop__reply--compact">
+            <strong>資源說明</strong>
+            {'\n'}
+            {resourceReplyZh}
+          </div>
+        ) : null}
+        {resourceNoteZh ? <p className="cloop__hint">{resourceNoteZh}</p> : null}
+
+        {checklist.length === 0 ? (
+          <p className="cloop__hint">尚無清單。請先「先問 AI」，再按「盤點資源」。</p>
+        ) : (
+          <ul className="cloop__checklist">
+            {checklist.map((it) => (
+              <li key={it.id} className="cloop__check-item">
+                <div className="cloop__check-head">
+                  <label className="cloop__check-label">
+                    <input
+                      type="checkbox"
+                      checked={checklistChecked[it.id] === true}
+                      onChange={() => toggleChecklist(it.id)}
+                    />
+                    <span className="cloop__check-kind">{kindLabelZh(it.kind)}</span>
+                  </label>
+                  <a className="cloop__check-link" href={it.browseUrl} target="_blank" rel="noopener noreferrer">
+                    前往 Civitai 搜尋
+                  </a>
+                </div>
+                {it.kind === 'checkpoint' ? (
+                  <CheckpointNameTags
+                    className="cloop__cknt"
+                    name={it.filename || it.titleZh}
+                    tags={it.modelTags}
+                    caption={it.detailZh ?? it.titleZh}
+                    localPresence={it.hasLocal ? 'match-installed' : 'match-missing'}
+                    emptyHint={it.modelTags.length === 0 ? '（無建議 tags）' : undefined}
+                  />
+                ) : (
+                  <div className="cloop__check-body">
+                    <div className="cloop__check-title">{it.titleZh}</div>
+                    {it.detailZh ? <p className="cloop__hint">{it.detailZh}</p> : null}
+                    {it.modelTags.length > 0 ? (
+                      <CheckpointNameTags
+                        className="cloop__cknt"
+                        name={it.titleZh}
+                        tags={it.modelTags}
+                        showTitle={false}
+                        localPresence="hidden"
+                      />
+                    ) : null}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {checklist.length > 0 ? (
+          <p className="cloop__hint" role="status">
+            {allChecklistChecked ? '已可按下「依建議生圖」。' : '請勾滿清單後再生成。'}
+          </p>
+        ) : null}
+      </aside>
     </div>
   )
 }

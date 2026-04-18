@@ -18,6 +18,7 @@ import {
   evaluateAnchorPortraitGate,
   evaluateIdentityContinuationGate,
 } from '../services/characterLibraryVisionGates.js'
+import { runCharacterTxt2imgFromLibrary } from '../services/characterLibraryTxt2imgGeneration.js'
 
 function filePathForImage(characterId: string, imageId: string): string {
   return `/characters/${characterId}/images/${imageId}/file`
@@ -236,6 +237,33 @@ export function createCharacterLibraryRoutes(env: ServerEnv) {
           }
         }
         return c.json(bodyOut, e.status as ContentfulStatusCode)
+      }
+      const message = e instanceof Error ? e.message : String(e)
+      return c.json({ ok: false, message }, 502)
+    }
+  })
+
+  r.post('/characters/:id/generations/txt2img', async (c) => {
+    const characterId = c.req.param('id')
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ ok: false, message: 'Request body must be JSON' }, 400)
+    }
+    if (body == null || typeof body !== 'object') {
+      return c.json({ ok: false, message: 'Expected a JSON object body' }, 400)
+    }
+    try {
+      const out = await runCharacterTxt2imgFromLibrary({
+        env,
+        characterId,
+        body,
+      })
+      return c.json({ ok: true, ...out })
+    } catch (e) {
+      if (e instanceof AppHttpError) {
+        return c.json({ ok: false, message: e.message }, e.status as ContentfulStatusCode)
       }
       const message = e instanceof Error ? e.message : String(e)
       return c.json({ ok: false, message }, 502)

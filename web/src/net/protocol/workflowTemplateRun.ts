@@ -15,11 +15,17 @@ export class WorkflowTemplateRunReq extends HttpRequest {
   private templateId = ''
   private payload: Record<string, unknown> = {}
 
-  onAllocate(templateId: string, patch?: Record<string, unknown>, timeoutMs?: number): void {
+  onAllocate(
+    templateId: string,
+    patch?: Record<string, unknown>,
+    timeoutMs?: number,
+    referenceImagePngBase64?: string | null,
+  ): void {
     this.templateId = templateId.trim()
     this.payload = {
       patch: patch ?? {},
       ...(timeoutMs != null ? { timeoutMs } : {}),
+      ...(referenceImagePngBase64?.trim() ? { referenceImagePngBase64: referenceImagePngBase64.trim() } : {}),
     }
   }
 

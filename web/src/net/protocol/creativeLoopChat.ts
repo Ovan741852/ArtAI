@@ -12,6 +12,9 @@ export type CreativeLoopPatchApply =
 export type CreativeLoopChatOkData = {
   ollamaModel: string
   selectedTemplateId: string
+  runMode: 'txt2img' | 'img2img'
+  templateRouteZh: string
+  warnings: string[]
   templateTitleZh: string
   localCheckpoints: string[]
   attachedImageCount: number
@@ -24,12 +27,13 @@ export type CreativeLoopChatOkData = {
 }
 
 export class CreativeLoopChatReq extends HttpRequest {
-  private payload: Record<string, unknown> = { messages: [], selectedTemplateId: '' }
+  private payload: Record<string, unknown> = { messages: [] }
 
   onAllocate(
     messages: CreativeLoopChatMessage[],
-    selectedTemplateId: string,
     opts?: {
+      /** 進階覆寫；省略則由伺服器依是否有參考圖自動選模板。 */
+      selectedTemplateId?: string | null
       ollamaModel?: string
       imageBase64?: string | null
       imageBase64s?: string[] | null
@@ -38,9 +42,10 @@ export class CreativeLoopChatReq extends HttpRequest {
   ): void {
     const imgs = opts?.imageBase64s?.map((s) => s.trim()).filter((s) => s.length > 0) ?? []
     const single = opts?.imageBase64?.trim()
+    const tid = opts?.selectedTemplateId?.trim()
     this.payload = {
       messages,
-      selectedTemplateId: selectedTemplateId.trim(),
+      ...(tid ? { selectedTemplateId: tid } : {}),
       ...(opts?.ollamaModel ? { ollamaModel: opts.ollamaModel } : {}),
       ...(single ? { imageBase64: single } : {}),
       ...(imgs.length > 0 ? { imageBase64s: imgs } : {}),
@@ -125,10 +130,18 @@ export class CreativeLoopChatRsp extends HttpPacket {
       }
     }
 
+    const warnings = Array.isArray(o.warnings)
+      ? o.warnings.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((s) => s.trim())
+      : []
+    const runMode = o.runMode === 'img2img' ? 'img2img' : 'txt2img'
+
     this.ok = true
     this.data = {
       ollamaModel: typeof o.ollamaModel === 'string' ? o.ollamaModel : '',
       selectedTemplateId: typeof o.selectedTemplateId === 'string' ? o.selectedTemplateId : '',
+      runMode,
+      templateRouteZh: typeof o.templateRouteZh === 'string' ? o.templateRouteZh : '',
+      warnings,
       templateTitleZh: typeof o.templateTitleZh === 'string' ? o.templateTitleZh : '',
       localCheckpoints: readStringArray(o.localCheckpoints),
       attachedImageCount: typeof o.attachedImageCount === 'number' ? o.attachedImageCount : 0,

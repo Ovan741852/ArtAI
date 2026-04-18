@@ -2,6 +2,12 @@ import type { ServerEnv } from '../config/env.js'
 import { applyWorkflowTemplatePatch } from './applyWorkflowTemplatePatch.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
 import { runComfyPromptToFirstPngBuffer } from './comfyPromptExecution.js'
+import {
+  setFirstLoadImageFilename,
+  uploadImageToComfyui,
+  workflowHasLoadImage,
+} from './comfyUploadImage.js'
+import { decodeMattingImageBase64 } from './mattingImageBytes.js'
 import { getWorkflowTemplateById } from './workflowTemplatesRegistry.js'
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -38,6 +44,19 @@ function parseTimeoutMs(raw: unknown): number | undefined {
 export type WorkflowTemplateRunBody = {
   patch?: Record<string, unknown>
   timeoutMs?: number
+  /** 圖生圖等：解碼後上傳至 Comfy 並寫入第一個 LoadImage。可含 data URL 前綴；規則同摳圖 API。 */
+  referenceImagePngBase64?: string
+}
+
+function parseReferenceImagePngBase64(rec: Record<string, unknown>): string | null {
+  if (!Object.prototype.hasOwnProperty.call(rec, 'referenceImagePngBase64')) {
+    return null
+  }
+  const v = rec.referenceImagePngBase64
+  if (v == null || typeof v !== 'string' || !v.trim()) {
+    return null
+  }
+  return v.trim()
 }
 
 /**
@@ -52,6 +71,7 @@ export async function runWorkflowTemplateOnComfy(
   const rec = body != null && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {}
   const patch = parsePatch(rec.patch)
   const timeoutMs = parseTimeoutMs(rec.timeoutMs) ?? DEFAULT_RUN_TIMEOUT_MS
+  const refB64 = parseReferenceImagePngBase64(rec)
 
   const template = await getWorkflowTemplateById(id)
   if (!template) {
@@ -64,6 +84,22 @@ export async function runWorkflowTemplateOnComfy(
   }
 
   const wf = applied.workflow as Record<string, { class_type: string; inputs: Record<string, unknown> }>
+
+  if (refB64) {
+    if (!workflowHasLoadImage(wf)) {
+      throw new AppHttpError(400, '此模板不含 LoadImage，無法使用 referenceImagePngBase64')
+    }
+    try {
+      const decoded = decodeMattingImageBase64(refB64)
+      const uploadedName = await uploadImageToComfyui(env.comfyuiBaseUrl, decoded)
+      setFirstLoadImageFilename(wf, uploadedName)
+    } catch (e) {
+      if (e instanceof AppHttpError) throw e
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new AppHttpError(400, `參考圖處理失敗：${msg}`)
+    }
+  }
+
   const buf = await runComfyPromptToFirstPngBuffer({
     comfyuiBaseUrl: env.comfyuiBaseUrl,
     prompt: wf as Record<string, unknown>,

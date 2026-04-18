@@ -7,6 +7,7 @@ import { MattingPanelWindow } from './mattingPanel/MattingPanelWindow'
 import { CreativeLoopPanelWindow } from './creativeLoopPanel/CreativeLoopPanelWindow'
 import { CharacterLibraryWindow } from './characterLibrary/CharacterLibraryWindow'
 import { CharacterRosterPanelWindow } from './characterLibrary/CharacterRosterPanelWindow'
+import { CharacterGeneratePanelWindow } from './characterGenerate/CharacterGeneratePanelWindow'
 import { DemoEchoReq, DemoEchoRsp, createDefaultHttpClient } from './net'
 import { useHelloStore } from './store/useHelloStore'
 
@@ -66,6 +67,9 @@ function App() {
       </section>
       <section className="clib-panel" aria-label="角色庫">
         <CharacterLibraryWindow />
+      </section>
+      <section className="chgen-panel" aria-label="角色文生圖試作">
+        <CharacterGeneratePanelWindow />
       </section>
       <div className="hello hello--tools">
         <LocalModelsDumpWindow />

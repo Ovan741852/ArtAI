@@ -9,6 +9,7 @@ import {
   MAX_OLLAMA_VISION_IMAGES,
   parseOllamaVisionImagesFromBody,
 } from './ollamaVisionImagesFromBody.js'
+import { resolveCreativeLoopTemplate } from './creativeLoopTemplatePick.js'
 import type { WorkflowTemplateDoc, WorkflowTemplateListItem } from './workflowTemplatesRegistry.js'
 import { getWorkflowTemplateById, listWorkflowTemplates } from './workflowTemplatesRegistry.js'
 
@@ -20,8 +21,10 @@ export type CreativeLoopMessage = {
 export type CreativeLoopChatBody = {
   messages: CreativeLoopMessage[]
   ollamaModel?: string
-  /** 必填：此輪要套用的 workflow 模板 id。 */
-  selectedTemplateId: string
+  /**
+   * 選填：進階覆寫模板 id；省略時依「是否有參考圖」自動選 `basic-txt2img` 或 `basic-img2img`。
+   */
+  selectedTemplateId?: string
   imageBase64?: string
   imageBase64s?: string[]
   /** 可選：上一張生成結果 PNG（無 data URL 前綴），供視覺模型對照；與參考圖合計仍受張數上限。 */
@@ -31,6 +34,12 @@ export type CreativeLoopChatBody = {
 export type CreativeLoopChatResult = {
   ollamaModel: string
   selectedTemplateId: string
+  /** 文生圖或圖生圖（依模板自動選）。 */
+  runMode: 'txt2img' | 'img2img'
+  /** 繁中短語，供 UI 顯示。 */
+  templateRouteZh: string
+  /** 例如缺少 img2img 模板時改走文生圖。 */
+  warnings: string[]
   templateTitleZh: string
   localCheckpoints: string[]
   templates: WorkflowTemplateListItem[]
@@ -61,7 +70,7 @@ function readNonEmptyString(x: unknown, field: string): string {
   return x.trim()
 }
 
-function normalizeMessagesCreativeLoop(raw: unknown): CreativeLoopMessage[] {
+export function normalizeMessagesCreativeLoop(raw: unknown): CreativeLoopMessage[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new AppHttpError(400, 'Body field "messages" must be a non-empty array')
   }
@@ -89,7 +98,7 @@ function normalizeMessagesCreativeLoop(raw: unknown): CreativeLoopMessage[] {
   return out
 }
 
-function formatTranscript(messages: CreativeLoopMessage[]): string {
+export function formatCreativeLoopTranscript(messages: CreativeLoopMessage[]): string {
   return messages
     .map((m) => {
       const label = m.role === 'user' ? 'User' : 'Assistant'
@@ -98,9 +107,10 @@ function formatTranscript(messages: CreativeLoopMessage[]): string {
     .join('\n\n---\n\n')
 }
 
-function parseRequiredTemplateId(raw: unknown): string {
+function parseOptionalTemplateIdOverride(raw: unknown): string | null {
+  if (raw == null) return null
   if (typeof raw !== 'string' || !raw.trim()) {
-    throw new AppHttpError(400, 'Body field "selectedTemplateId" is required')
+    return null
   }
   const t = raw.trim()
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(t)) {
@@ -180,13 +190,34 @@ export async function runCreativeLoopChat(env: ServerEnv, bodyRaw: unknown): Pro
   }
   const body = bodyRaw as Record<string, unknown>
   const messages = normalizeMessagesCreativeLoop(body.messages)
-  const selectedTemplateId = parseRequiredTemplateId(body.selectedTemplateId)
+  const overrideId = parseOptionalTemplateIdOverride(body.selectedTemplateId)
   const ollamaModel = typeof body.ollamaModel === 'string' && body.ollamaModel.trim() ? body.ollamaModel.trim() : env.ollamaSummaryModel
   if (!ollamaModel) {
     throw new AppHttpError(
       400,
       'Ollama model is required: pass "ollamaModel" in JSON or set env OLLAMA_SUMMARY_MODEL',
     )
+  }
+
+  let selectedTemplateId: string
+  let runMode: CreativeLoopChatResult['runMode']
+  let templateRouteZh: string
+  let warnings: string[] = []
+
+  if (overrideId) {
+    const docOverride = await getWorkflowTemplateById(overrideId)
+    if (!docOverride) {
+      throw new AppHttpError(404, `Unknown workflow template: "${overrideId}"`)
+    }
+    selectedTemplateId = overrideId
+    runMode = overrideId === 'basic-img2img' ? 'img2img' : 'txt2img'
+    templateRouteZh = overrideId === 'basic-img2img' ? '圖生圖（覆寫模板）' : '文生圖（覆寫模板）'
+  } else {
+    const pick = await resolveCreativeLoopTemplate(body)
+    selectedTemplateId = pick.selectedTemplateId
+    runMode = pick.runMode
+    templateRouteZh = pick.templateRouteZh
+    warnings = [...pick.warnings]
   }
 
   const templateDoc = await getWorkflowTemplateById(selectedTemplateId)
@@ -226,6 +257,15 @@ export async function runCreativeLoopChat(env: ServerEnv, bodyRaw: unknown): Pro
     ]),
   )
 
+  const img2imgHints =
+    templateDoc.id === 'basic-img2img'
+      ? [
+          'This template is IMG2IMG: latent comes from the user reference image; KSampler has "denoise" (0-1). Prefer denoise around 0.55-0.75 unless the user wants a near-identical edit (lower) or heavy change (higher).',
+          'Still set positive_prompt / negative_prompt in English when possible for base models.',
+          '',
+        ].join('\n')
+      : ''
+
   const prompt = [
     'You are an image-generation planning assistant for non-expert users.',
     'The user writes mainly in Traditional Chinese; you may reason in English internally.',
@@ -233,6 +273,8 @@ export async function runCreativeLoopChat(env: ServerEnv, bodyRaw: unknown): Pro
     'Do NOT use ComfyUI jargon in "replyZh" (no node ids); prefer plain Traditional Chinese: lighting, composition, style, realism, "closer to reference images", etc.',
     'When reference images are attached, use them to align subject, style, palette, and composition when helpful.',
     'When the last attached image is the previous generated output (server marks it LAST_OUTPUT in the prompt), compare it with reference images and the user request.',
+    'For "ckpt_name" you MUST pick an exact string from the LOCAL checkpoint filenames list below (verbatim). Never invent filenames.',
+    img2imgHints,
     '',
     'SELECTED TEMPLATE (machine-readable):',
     JSON.stringify(
@@ -263,13 +305,14 @@ export async function runCreativeLoopChat(env: ServerEnv, bodyRaw: unknown): Pro
         ].join('\n')
       : '',
     'Conversation (newest at the end):',
-    formatTranscript(messages),
+    formatCreativeLoopTranscript(messages),
     '',
     'Task: respond to the LATEST user message. Output ONE JSON object only, no markdown, no commentary.',
     'Keys exactly:',
     '- "replyZh": Traditional Chinese reply (concise, friendly, actionable).',
     '- "understandingZh": optional string — short restatement of what the user wants.',
     '- "proposedPatch": object — ONLY keys from the whitelist; values must match parameter types.',
+    '  For whitelist params typed as string (e.g. scheduler, sampler_name, ckpt_name), use JSON strings (e.g. "normal", "euler"), never bare numbers.',
   ].join('\n')
 
   const raw = await ollamaGenerateNonStream({
@@ -325,6 +368,9 @@ export async function runCreativeLoopChat(env: ServerEnv, bodyRaw: unknown): Pro
   return {
     ollamaModel,
     selectedTemplateId,
+    runMode,
+    templateRouteZh,
+    warnings,
     templateTitleZh: templateDoc.titleZh,
     localCheckpoints,
     templates,

@@ -20,20 +20,35 @@ function clampNum(n: number, min?: number, max?: number): number {
   return x
 }
 
+function coerceToNonEmptyString(key: string, raw: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (raw == null) {
+    return { ok: false, message: `param "${key}": expected a non-empty string (got null/undefined)` }
+  }
+  if (typeof raw === 'string') {
+    const s = raw.trim()
+    if (!s) {
+      return { ok: false, message: `param "${key}": string must not be empty` }
+    }
+    return { ok: true, value: s }
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const s = String(raw).trim()
+    if (!s) {
+      return { ok: false, message: `param "${key}": string must not be empty` }
+    }
+    return { ok: true, value: s }
+  }
+  const kind = Array.isArray(raw) ? 'array' : typeof raw
+  return { ok: false, message: `param "${key}": expected string (got ${kind})` }
+}
+
 function coerceValue(
   key: string,
   spec: WhitelistParamSpec,
   raw: unknown,
 ): { ok: true; value: string | number } | { ok: false; message: string } {
   if (spec.type === 'string') {
-    if (typeof raw !== 'string') {
-      return { ok: false, message: `param "${key}": expected string` }
-    }
-    const s = raw.trim()
-    if (!s) {
-      return { ok: false, message: `param "${key}": string must not be empty` }
-    }
-    return { ok: true, value: s }
+    return coerceToNonEmptyString(key, raw)
   }
   if (spec.type === 'int') {
     const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN
