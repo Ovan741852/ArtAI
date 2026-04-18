@@ -1,5 +1,6 @@
 import './App.css'
 import { useCallback, useState } from 'react'
+import { LocalModelsDumpWindow } from './localModelsDump/LocalModelsDumpWindow'
 import { DemoEchoReq, DemoEchoRsp, createDefaultHttpClient } from './net'
 import { useHelloStore } from './store/useHelloStore'
 
@@ -40,6 +41,7 @@ function App() {
           <code>{netPreview}</code>
         </pre>
       ) : null}
+      <LocalModelsDumpWindow />
     </main>
   )
 }

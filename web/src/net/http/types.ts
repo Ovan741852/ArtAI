@@ -30,8 +30,11 @@ export type AllocateParams<T extends HttpRequest> = T extends {
 export abstract class HttpRequest {
   static allocate<T extends HttpRequest>(this: new () => T, ...params: AllocateParams<T>): T {
     const instance = new this()
-    const alloc = instance.onAllocate as ((...args: never) => void) | undefined
-    alloc?.(...(params as never))
+    const alloc = instance.onAllocate
+    if (alloc) {
+      // 必須帶上 instance：若先把方法存成變數再呼叫，執行時 `this` 會是 undefined。
+      Reflect.apply(alloc, instance, params)
+    }
     return instance
   }
 

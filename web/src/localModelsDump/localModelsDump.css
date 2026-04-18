@@ -1,0 +1,124 @@
+.dump {
+  box-sizing: border-box;
+  max-width: 520px;
+  margin: 28px auto 0;
+  padding: 14px 16px 20px;
+  min-height: 0;
+}
+
+.dump__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.dump__title {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  flex: 1 1 auto;
+}
+
+.dump__meta {
+  font-size: 0.78rem;
+  color: var(--text);
+  width: 100%;
+}
+
+.dump__meta code {
+  font-size: inherit;
+}
+
+.dump__refresh {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.dump__refresh:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dump__badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.dump__err {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-h);
+  font-size: 0.88rem;
+  margin-bottom: 12px;
+}
+
+.dump__block {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.dump__block h2 {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.dump__sub {
+  margin: 0;
+  padding: 4px 12px 8px;
+  font-size: 0.78rem;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.dump__list {
+  margin: 0;
+  padding: 6px 0 8px;
+  max-height: 200px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.dump__list li {
+  padding: 3px 12px;
+  list-style: none;
+}
+
+.dump__list li:nth-child(even) {
+  background: var(--social-bg);
+}
+
+.dump__warn {
+  padding: 6px 12px 8px;
+  font-size: 0.8rem;
+  color: var(--text-h);
+}
+
+.dump__empty {
+  padding: 8px 12px 10px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
