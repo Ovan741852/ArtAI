@@ -1,4 +1,58 @@
 /**
+ * 移除 JSON 中「物件／陣列尾端多餘的逗號」（僅在字串外），不處理單引號或其它語法。
+ * LLM 常產出 `{"a":[1,],}` 或 `{"a":1,}` 導致 `JSON.parse` 失敗。
+ */
+function stripTrailingCommasOutsideStrings(input: string): string {
+  const out: string[] = []
+  let i = 0
+  let inStr = false
+  let esc = false
+  while (i < input.length) {
+    const c = input[i]!
+    if (esc) {
+      out.push(c)
+      esc = false
+      i += 1
+      continue
+    }
+    if (inStr) {
+      if (c === '\\') {
+        out.push(c)
+        esc = true
+        i += 1
+        continue
+      }
+      if (c === '"') {
+        out.push(c)
+        inStr = false
+        i += 1
+        continue
+      }
+      out.push(c)
+      i += 1
+      continue
+    }
+    if (c === '"') {
+      out.push(c)
+      inStr = true
+      i += 1
+      continue
+    }
+    if (c === ',') {
+      let j = i + 1
+      while (j < input.length && /\s/.test(input[j]!)) j += 1
+      if (j < input.length && (input[j] === '}' || input[j] === ']')) {
+        i = j
+        continue
+      }
+    }
+    out.push(c)
+    i += 1
+  }
+  return out.join('')
+}
+
+/**
  * 從 LLM 回覆中取出單一 JSON 物件（允許前綴說明、```json 圍欄與尾端雜訊）。
  */
 export function parseJsonObjectFromLlm(text: string): unknown {
@@ -18,5 +72,16 @@ export function parseJsonObjectFromLlm(text: string): unknown {
     throw new Error('LLM output does not contain a JSON object')
   }
 
-  return JSON.parse(t.slice(start, end + 1)) as unknown
+  const slice = t.slice(start, end + 1)
+  try {
+    return JSON.parse(slice) as unknown
+  } catch (e1) {
+    try {
+      return JSON.parse(stripTrailingCommasOutsideStrings(slice)) as unknown
+    } catch (e2) {
+      const m1 = e1 instanceof Error ? e1.message : String(e1)
+      const m2 = e2 instanceof Error ? e2.message : String(e2)
+      throw new Error(`${m1} (after trailing-comma repair: ${m2})`)
+    }
+  }
 }

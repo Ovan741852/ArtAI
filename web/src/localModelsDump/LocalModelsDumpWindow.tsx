@@ -27,6 +27,9 @@ function catalogEntryTrained(e: CatalogEntry): string[] {
   return e.civitaiTrainedWords ?? []
 }
 
+const NO_CATALOG_ROW_HINT =
+  '（無目錄條目 — 至下方「Checkpoint 目錄」按「同步 checkpoint 目錄」）'
+
 type CheckpointSummaryModal = {
   filename: string
   modelName: string | null
@@ -34,6 +37,8 @@ type CheckpointSummaryModal = {
   trainedWords: string[]
   baseModel: string | null
   creator: string | null
+  /** 本機有檔但目錄無對應時，只在視窗內顯示此說明，不佔用列表版面。 */
+  catalogMissingMessage?: string
 }
 
 export function LocalModelsDumpWindow() {
@@ -167,7 +172,6 @@ export function LocalModelsDumpWindow() {
                   const tags = cat ? catalogEntryTags(cat) : []
                   const desc = cat ? catalogEntryDesc(cat) : ''
                   const trained = cat ? catalogEntryTrained(cat) : []
-                  const canModal = Boolean(cat)
                   return (
                     <li key={name}>
                       <div className="dump__ck-row">
@@ -177,34 +181,40 @@ export function LocalModelsDumpWindow() {
                             name={name}
                             tags={tags}
                             localPresence={cat ? 'local-in-catalog' : 'local-no-catalog'}
-                            emptyHint={
-                              cat
-                                ? '(no tags)'
-                                : '（無目錄條目 — 至下方「Checkpoint 目錄」按「同步 checkpoint 目錄」）'
-                            }
+                            emptyHint={cat ? '(no tags)' : undefined}
                             trailing={
                               <button
                                 type="button"
                                 className="dump__ck-summary-btn"
-                                disabled={!canModal}
                                 title={
-                                  canModal
+                                  cat
                                     ? 'Open Civitai description & metadata'
-                                    : 'Sync catalog below to attach Civitai metadata'
+                                    : '為何沒有 tags／說明（需先同步目錄）'
                                 }
                                 onClick={() => {
-                                  if (!cat) return
+                                  if (cat) {
+                                    setCkModal({
+                                      filename: name,
+                                      modelName: cat.civitaiModelName ?? null,
+                                      description: desc,
+                                      trainedWords: trained,
+                                      baseModel: cat.civitaiBaseModel ?? null,
+                                      creator: cat.civitaiCreatorUsername ?? null,
+                                    })
+                                    return
+                                  }
                                   setCkModal({
                                     filename: name,
-                                    modelName: cat.civitaiModelName ?? null,
-                                    description: desc,
-                                    trainedWords: trained,
-                                    baseModel: cat.civitaiBaseModel ?? null,
-                                    creator: cat.civitaiCreatorUsername ?? null,
+                                    modelName: null,
+                                    description: '',
+                                    trainedWords: [],
+                                    baseModel: null,
+                                    creator: null,
+                                    catalogMissingMessage: NO_CATALOG_ROW_HINT,
                                   })
                                 }}
                               >
-                                Summary
+                                詳細
                               </button>
                             }
                           />
@@ -279,30 +289,31 @@ export function LocalModelsDumpWindow() {
                         localPresence="local-in-catalog"
                         caption={e.civitaiModelName ? `— ${e.civitaiModelName}` : null}
                         emptyHint="(no tags)"
+                        trailing={
+                          <button
+                            type="button"
+                            className="dump__ck-summary-btn"
+                            title="檢視作者、底模與 Civitai 說明"
+                            onClick={() => {
+                              setCkModal({
+                                filename: e.localFilename,
+                                modelName: e.civitaiModelName ?? null,
+                                description: desc,
+                                trainedWords: trained,
+                                baseModel: e.civitaiBaseModel ?? null,
+                                creator: e.civitaiCreatorUsername ?? null,
+                              })
+                            }}
+                          >
+                            詳細
+                          </button>
+                        }
                       />
-                      {e.civitaiCreatorUsername ? (
-                        <p className="dump__entry-meta">
-                          <span className="dump__label-en">Creator</span> {e.civitaiCreatorUsername}
-                        </p>
-                      ) : null}
-                      {e.civitaiBaseModel ? (
-                        <p className="dump__entry-meta">
-                          <span className="dump__label-en">Base model</span> {e.civitaiBaseModel}
-                        </p>
-                      ) : null}
                       {trained.length > 0 ? (
                         <p className="dump__entry-meta">
                           <span className="dump__label-en">Trained words</span> {trained.join(', ')}
                         </p>
                       ) : null}
-                      <div className="dump__entry-descblock">
-                        <span className="dump__label-en">Description (Civitai, usually EN)</span>
-                        {desc ? (
-                          <p className="dump__entry-desc">{desc}</p>
-                        ) : (
-                          <p className="dump__muted">(no description)</p>
-                        )}
-                      </div>
                     </article>
                   )
                 })}
@@ -331,30 +342,36 @@ export function LocalModelsDumpWindow() {
                 ×
               </button>
             </header>
-            {ckModal.modelName ? (
+            {ckModal.catalogMissingMessage ? null : ckModal.modelName ? (
               <p className="dump__modal-sub">{ckModal.modelName}</p>
             ) : null}
             <div className="dump__modal-body">
-              {ckModal.creator ? (
-                <p className="dump__modal-meta">
-                  <span className="dump__label-en">Creator</span> {ckModal.creator}
-                </p>
-              ) : null}
-              {ckModal.baseModel ? (
-                <p className="dump__modal-meta">
-                  <span className="dump__label-en">Base model</span> {ckModal.baseModel}
-                </p>
-              ) : null}
-              {ckModal.trainedWords.length > 0 ? (
-                <p className="dump__modal-meta">
-                  <span className="dump__label-en">Trained words</span> {ckModal.trainedWords.join(', ')}
-                </p>
-              ) : null}
-              <p className="dump__label-en dump__modal-seclabel">Description (Civitai)</p>
-              {ckModal.description ? (
-                <pre className="dump__modal-desc">{ckModal.description}</pre>
+              {ckModal.catalogMissingMessage ? (
+                <p className="dump__modal-hint">{ckModal.catalogMissingMessage}</p>
               ) : (
-                <p className="dump__muted">(no description in catalog)</p>
+                <>
+                  {ckModal.creator ? (
+                    <p className="dump__modal-meta">
+                      <span className="dump__label-en">Creator</span> {ckModal.creator}
+                    </p>
+                  ) : null}
+                  {ckModal.baseModel ? (
+                    <p className="dump__modal-meta">
+                      <span className="dump__label-en">Base model</span> {ckModal.baseModel}
+                    </p>
+                  ) : null}
+                  {ckModal.trainedWords.length > 0 ? (
+                    <p className="dump__modal-meta">
+                      <span className="dump__label-en">Trained words</span> {ckModal.trainedWords.join(', ')}
+                    </p>
+                  ) : null}
+                  <p className="dump__label-en dump__modal-seclabel">Description (Civitai)</p>
+                  {ckModal.description ? (
+                    <pre className="dump__modal-desc">{ckModal.description}</pre>
+                  ) : (
+                    <p className="dump__muted">(no description in catalog)</p>
+                  )}
+                </>
               )}
             </div>
             <footer className="dump__modal-foot">

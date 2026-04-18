@@ -31,6 +31,16 @@ export type ServerEnv = {
    * 環境變數：`LOCAL_MODELS_DUMP_TTL_MS`（預設 30000）。
    */
   localModelsDumpTtlMs: number
+  /**
+   * `GET /comfy/object_info` 記憶體快取 TTL（毫秒）。`0` 表示每次請求都轉呼 ComfyUI。
+   * 環境變數：`COMFY_OBJECT_INFO_TTL_MS`（預設與 dump 相同 30000）。
+   */
+  comfyObjectInfoTtlMs: number
+  /**
+   * Remove.bg API Key（選填）。若設定且讀圖分類適用，會優先列入高品質去背候選。
+   * @see https://www.remove.bg/api
+   */
+  removeBgApiKey: string | undefined
 }
 
 function parsePort(raw: string | undefined, fallback: number): number {
@@ -103,5 +113,10 @@ export function loadServerEnv(): ServerEnv {
       undefined,
     ollamaSummaryModel: process.env.OLLAMA_SUMMARY_MODEL?.trim() || 'llama3.2',
     localModelsDumpTtlMs: parseNonNegativeInt(process.env.LOCAL_MODELS_DUMP_TTL_MS, 30_000),
+    comfyObjectInfoTtlMs: parseNonNegativeInt(
+      process.env.COMFY_OBJECT_INFO_TTL_MS,
+      parseNonNegativeInt(process.env.LOCAL_MODELS_DUMP_TTL_MS, 30_000),
+    ),
+    removeBgApiKey: process.env.REMOVE_BG_API_KEY?.trim() || undefined,
   }
 }
