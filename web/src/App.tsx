@@ -23,28 +23,34 @@ function App() {
   }, [])
 
   return (
-    <main className="hello">
-      <h1>React + Zustand Hello World</h1>
-      <p>Count: {count}</p>
-      <div className="hello__actions">
-        <button type="button" onClick={increase}>
-          +1
-        </button>
-        <button type="button" onClick={reset}>
-          Reset
-        </button>
-        <button type="button" onClick={runNetDemo}>
-          Net demo (echo)
-        </button>
+    <div className="app-shell">
+      <main className="hello">
+        <h1>React + Zustand Hello World</h1>
+        <p>Count: {count}</p>
+        <div className="hello__actions">
+          <button type="button" onClick={increase}>
+            +1
+          </button>
+          <button type="button" onClick={reset}>
+            Reset
+          </button>
+          <button type="button" onClick={runNetDemo}>
+            Net demo (echo)
+          </button>
+        </div>
+        {netPreview ? (
+          <pre className="hello__net">
+            <code>{netPreview}</code>
+          </pre>
+        ) : null}
+      </main>
+      <section className="cta-panel" aria-label="Checkpoint 需求助手">
+        <CheckpointTagAssistantWindow />
+      </section>
+      <div className="hello hello--tools">
+        <LocalModelsDumpWindow />
       </div>
-      {netPreview ? (
-        <pre className="hello__net">
-          <code>{netPreview}</code>
-        </pre>
-      ) : null}
-      <CheckpointTagAssistantWindow />
-      <LocalModelsDumpWindow />
-    </main>
+    </div>
   )
 }
 

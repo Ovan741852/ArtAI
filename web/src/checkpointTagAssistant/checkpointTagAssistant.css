@@ -1,17 +1,19 @@
 .cta {
   box-sizing: border-box;
-  max-width: 1160px;
-  margin: 28px auto 0;
-  padding: 20px 20px 28px;
+  width: 100%;
+  max-width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 22px clamp(16px, 2.5vw, 28px) 32px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg);
+  box-shadow: var(--shadow);
 }
 
 .cta__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px) minmax(0, 1fr);
-  gap: 16px 20px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 340px) minmax(0, 1.15fr);
+  gap: 18px 24px;
   align-items: stretch;
 }
 
