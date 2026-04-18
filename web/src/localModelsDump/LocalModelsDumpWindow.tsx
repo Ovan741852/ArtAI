@@ -176,6 +176,7 @@ export function LocalModelsDumpWindow() {
                             className="dump__ck-cknt"
                             name={name}
                             tags={tags}
+                            localPresence={cat ? 'local-in-catalog' : 'local-no-catalog'}
                             emptyHint={
                               cat
                                 ? '(no tags)'
@@ -275,6 +276,7 @@ export function LocalModelsDumpWindow() {
                         className="dump__entry-cknt"
                         name={e.localFilename}
                         tags={tags}
+                        localPresence="local-in-catalog"
                         caption={e.civitaiModelName ? `— ${e.civitaiModelName}` : null}
                         emptyHint="(no tags)"
                       />

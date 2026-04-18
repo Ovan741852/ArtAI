@@ -1,0 +1,26 @@
+---
+description: 前端顯示 checkpoint 檔名／模型名與 tags 時一律用共用元件 CheckpointNameTags
+globs: web/**/*.tsx,web/**/*.css
+alwaysApply: false
+---
+
+# Web：`CheckpointNameTags` 共用元件
+
+## 元件位置
+
+- `web/src/components/checkpoint/CheckpointNameTags.tsx`
+- 樣式：`web/src/components/checkpoint/checkpointNameTags.css`（BEM 前綴 `cknt__`）
+
+## 何時必須使用
+
+凡 UI 要同時呈現 **名稱（本機 `.safetensors` 檔名或 Civitai 模型名）** 與 **tag chips**（多為 Civitai `tags`），應優先使用 **`CheckpointNameTags`**，不要在新畫面手刻一組 `dump__tag`／`cta__bubble-tag` 等平行樣式。
+
+已使用處（新增畫面請對齊）：`LocalModelsDumpWindow`、`CheckpointTagAssistantWindow`（本機清單、對話內建議 tags、**搜尋紀錄**裡的 Civitai 結果列）。
+
+## 僅「一組 tags」、沒有檔名列時
+
+傳 **`showTitle={false}`**：不顯示標題列，`name` 僅作 **`aria-label`**（仍必填）。此模式下元件會 **先 tags、再 caption**（適合「此輪搜尋用 tags + 關鍵字說明」）。
+
+## 版面覆寫
+
+外層可用 `className` 包一層 wrapper（例如 `dump__ck-cknt`、`cta__hist-tagblock`），在父層 CSS 微調間距即可；**不要**複製 `.cknt__tag` 的視覺規則到別處。
