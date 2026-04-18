@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { AssistantResourceExtras } from '../components/assistant/AssistantResourceExtras'
 import { CheckpointNameTags } from '../components/checkpoint/CheckpointNameTags'
 import { resolveRecommendedLocalPresence } from '../components/checkpoint/checkpointLocalPresence'
 import {
@@ -8,6 +9,7 @@ import {
   OllamaModelsRsp,
   createDefaultHttpClient,
   postCheckpointTagAssistantChatStream,
+  type AssistantResourceExtraOk,
   type CheckpointTagAssistantMessage,
   type CheckpointTagAssistantOkData,
 } from '../net'
@@ -36,6 +38,7 @@ type SearchHistoryEntry = {
   modelTags: string[]
   searchQueries: string[]
   recommendedModels: CivitaiRec[]
+  resourceExtras: AssistantResourceExtraOk[]
 }
 
 type SentImageEntry = {
@@ -340,6 +343,12 @@ export function CheckpointTagAssistantWindow() {
             modelTags: [...d.assistant.modelTags],
             searchQueries: [...d.assistant.searchQueries],
             recommendedModels: [...d.recommendedModels],
+            resourceExtras: d.resourceExtras.map((x) => ({
+              ...x,
+              modelTags: [...x.modelTags],
+              searchQueries: [...x.searchQueries],
+              recommendedModels: [...x.recommendedModels],
+            })),
           }
           setLocalRows(d.localCheckpoints)
           setSearchHistory((hist) => [entry, ...hist])
@@ -397,7 +406,8 @@ export function CheckpointTagAssistantWindow() {
         Checkpoint 需求助手
       </h2>
       <p className="cta__lead">
-        左欄為對話與每輪結論的 tag；中欄送出需求與參考圖；右欄顯示該輪已快取的 Civitai 搜尋結果。點左欄某一輪的 tag 區塊即可切換右欄（不重打 API）。
+        左欄為對話與每輪結論的 tag；中欄送出需求與參考圖；右欄為該輪快取的 **Checkpoint** 與下方 **延伸資源**（LoRA／Embedding／ControlNet
+        等條列；可連 Civitai 的會附連結）。點左欄某一輪的 tag 區塊可切換右欄（不重打 API）。
       </p>
 
       <div className="cta__grid">
@@ -645,6 +655,7 @@ export function CheckpointTagAssistantWindow() {
               ) : (
                 <p className="cta__muted">此輪無結果</p>
               )}
+              <AssistantResourceExtras extras={selectedEntry.resourceExtras} localRows={localRows} />
             </>
           )}
         </div>

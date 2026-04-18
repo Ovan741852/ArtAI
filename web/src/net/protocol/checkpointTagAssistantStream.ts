@@ -1,3 +1,4 @@
+import { parseAssistantResourceExtrasPayload } from './assistantResourceExtras'
 import type { CheckpointTagAssistantOkData } from './checkpointTagAssistant'
 
 function resolveArtaiUrl(pathOrUrl: string): string {
@@ -24,12 +25,15 @@ function parseFinalPayload(o: Record<string, unknown>): CheckpointTagAssistantOk
   const recommendedModels = Array.isArray(o.recommendedModels) ? o.recommendedModels : []
   const localCheckpoints = Array.isArray(o.localCheckpoints) ? o.localCheckpoints : []
 
+  const resourceExtras = parseAssistantResourceExtrasPayload(o.resourceExtras)
+
   return {
     ollamaModel,
     imageAttached,
     localCheckpoints: localCheckpoints as CheckpointTagAssistantOkData['localCheckpoints'],
     assistant: { replyZh, modelTags, searchQueries },
     recommendedModels: recommendedModels as CheckpointTagAssistantOkData['recommendedModels'],
+    resourceExtras,
   }
 }
 

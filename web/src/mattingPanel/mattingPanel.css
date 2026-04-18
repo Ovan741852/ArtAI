@@ -37,6 +37,57 @@
   margin-bottom: 14px;
 }
 
+.mat__toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+}
+
+.mat__toggles-title {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.mat__toggles-hint {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.mat__toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.mat__toggle-row input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.mat__toggle-label {
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.mat__toggle-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text);
+}
+
 .mat__label {
   font-size: 0.85rem;
   color: var(--text);

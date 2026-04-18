@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { AssistantResourceExtras } from '../components/assistant/AssistantResourceExtras'
 import { CheckpointNameTags } from '../components/checkpoint/CheckpointNameTags'
 import { splitStreamForDisplay } from '../checkpointTagAssistant/streamDisplay'
 import {
@@ -6,6 +7,7 @@ import {
   OllamaModelsRsp,
   createDefaultHttpClient,
   postModelBundleAssistantChatStream,
+  type AssistantResourceExtraOk,
   type ModelBundleAssistantBundleOk,
   type ModelBundleAssistantMessage,
 } from '../net'
@@ -28,6 +30,7 @@ type BundleHistoryEntry = {
   at: string
   bundles: ModelBundleAssistantBundleOk[]
   replyZh: string
+  resourceExtras: AssistantResourceExtraOk[]
 }
 
 type SentImageEntry = {
@@ -341,6 +344,12 @@ export function ModelBundleAssistantWindow() {
             at: new Date().toISOString(),
             bundles: d.bundles.map((b) => ({ ...b, loras: b.loras.map((x) => ({ ...x })) })),
             replyZh: d.assistant.replyZh,
+            resourceExtras: d.resourceExtras.map((x) => ({
+              ...x,
+              modelTags: [...x.modelTags],
+              searchQueries: [...x.searchQueries],
+              recommendedModels: [...x.recommendedModels],
+            })),
           }
           setBundleHistory((hist) => [entry, ...hist])
           setSelectedHistoryId(hid)
@@ -616,6 +625,7 @@ export function ModelBundleAssistantWindow() {
                   )}
                 </article>
               ))}
+              <AssistantResourceExtras extras={selectedEntry.resourceExtras} />
             </>
           )}
         </div>

@@ -5,6 +5,11 @@ import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
 import type { CivitaiModelRow } from './civitaiModelRowMap.js'
 import { mergeHotCivitaiModelsByTagsAndQueries } from './civitaiSuggestModelsFromDescriptions.js'
+import {
+  parseAssistantResourceExtrasFromLlm,
+  resolveAssistantResourceExtras,
+} from './assistantResourceExtras.js'
+import type { AssistantResourceExtraResolved } from './assistantResourceExtrasTypes.js'
 import { ollamaGenerateNonStream, ollamaGenerateStreamCollect } from './ollamaGenerate.js'
 
 export type ModelBundleAssistantRole = 'user' | 'assistant'
@@ -59,6 +64,8 @@ export type ModelBundleAssistantResult = {
     replyZh: string
   }
   bundles: ModelBundleResolved[]
+  /** ControlNet／Embedding 說明或額外 LoRA 主題；Civitai 可查種類會附搜尋結果。 */
+  resourceExtras: AssistantResourceExtraResolved[]
 }
 
 export type PreparedModelBundleAssistantTurn = {
@@ -285,6 +292,8 @@ export async function prepareModelBundleAssistantTurn(
     '- modelTags must be plausible Civitai MODEL tags in English (broad style/subject), not made-up commercial filenames.',
     '- Prefer distinct bundles when the user goal can be met multiple ways (e.g. anime vs semi-real).',
     '- Every bundle MUST list LoRAs that complement the checkpoint; do not return an empty "loras" array.',
+    '- "resourceExtras": optional array length 0-6 for items that do not fit inside bundles but must appear to the user (e.g. ControlNet workflow tip, negative embedding tip, extra LoRA theme).',
+    '  Same shape as checkpoint tag assistant: kind (lora | textual_inversion | controlnet | workflow), titleZh, detailZh?, modelTags?, searchQueries?; for lora/textual_inversion include English tags or queries for Civitai.',
   ].join('\n')
 
   return {
@@ -358,11 +367,19 @@ export async function completeModelBundleAssistantFromLlmRaw(
     })
   }
 
+  const extraSpecs = parseAssistantResourceExtrasFromLlm(o)
+  const resourceExtras = await resolveAssistantResourceExtras(env, extraSpecs, {
+    perSearchLimit: prep.perSearchLimit,
+    resultLimit: Math.min(4, prep.recommendLimitPerSlot),
+    nsfw: prep.nsfw,
+  })
+
   return {
     ollamaModel: prep.ollamaModel,
     imageAttached: prep.imageAttached,
     assistant: { replyZh },
     bundles,
+    resourceExtras,
   }
 }
 

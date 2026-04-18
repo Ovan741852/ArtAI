@@ -1,4 +1,5 @@
 export * from './http'
+export * from './protocol/assistantResourceExtras'
 export * from './protocol/catalogSyncFromComfy'
 export * from './protocol/checkpointTagAssistant'
 export * from './protocol/checkpointTagAssistantStream'

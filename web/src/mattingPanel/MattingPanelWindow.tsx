@@ -6,6 +6,7 @@ import {
   OllamaModelsRsp,
   createDefaultHttpClient,
   type MattingAutoOkData,
+  type MattingEnhancementsRequest,
 } from '../net'
 
 import './mattingPanel.css'
@@ -52,8 +53,6 @@ function executorLabelZh(e: MattingAutoOkData['chosenExecutor']): string {
   switch (e) {
     case 'comfy':
       return 'ComfyUI 節點'
-    case 'remove_bg':
-      return 'Remove.bg'
     case 'local_onnx':
       return '本機 ONNX'
     default:
@@ -75,6 +74,8 @@ export function MattingPanelWindow() {
   const [ollamaErr, setOllamaErr] = useState<string | null>(null)
   const [ollamaNames, setOllamaNames] = useState<string[]>([])
   const [ollamaPicked, setOllamaPicked] = useState('')
+
+  const [enhanceEdge, setEnhanceEdge] = useState(false)
 
   const revokeResultUrl = useCallback(() => {
     setResultUrl((prev) => {
@@ -168,8 +169,10 @@ export function MattingPanelWindow() {
     revokeResultUrl()
     setResult(null)
 
+    const enhancements: MattingEnhancementsRequest | undefined = enhanceEdge ? { edgeRefine: true } : undefined
+
     const res = await client.sendRequest(
-      MattingAutoReq.allocate(pending.base64, ollamaPicked || undefined),
+      MattingAutoReq.allocate(pending.base64, ollamaPicked || undefined, enhancements),
       MattingAutoRsp,
     )
     setLoading(false)
@@ -187,7 +190,7 @@ export function MattingPanelWindow() {
     const url = URL.createObjectURL(blob)
     setResultUrl(url)
     setResult(p.data)
-  }, [pending, ollamaPicked, revokeResultUrl])
+  }, [pending, ollamaPicked, enhanceEdge, revokeResultUrl])
 
   const downloadPng = useCallback(() => {
     if (!resultUrl) return
@@ -231,6 +234,24 @@ export function MattingPanelWindow() {
         </button>
       </div>
       {ollamaErr ? <p className="mat__err">{ollamaErr}</p> : null}
+
+      <div className="mat__toggles" aria-label="摳圖強化選項">
+        <p className="mat__toggles-title">強化（第二輪）</p>
+        <p className="mat__toggles-hint">勾選後，第一輪成功會再以本機 ONNX 對結果圖多跑一輪（修邊／半透明邊）。</p>
+        <div className="mat__toggle-row">
+          <input
+            id="mat-enhance-edge"
+            type="checkbox"
+            checked={enhanceEdge}
+            onChange={(e) => setEnhanceEdge(e.target.checked)}
+            disabled={loading}
+          />
+          <label className="mat__toggle-label" htmlFor="mat-enhance-edge">
+            邊緣強化
+            <span className="mat__toggle-note">第一輪後再以本機 ONNX 修飾邊緣與半透明邊。</span>
+          </label>
+        </div>
+      </div>
 
       <div className="mat__grid">
         <div className="mat__card">
@@ -326,6 +347,15 @@ export function MattingPanelWindow() {
               <dd>
                 {result.ollamaModelUsed}
                 {result.visionClassificationUsed ? '（已用視覺讀圖）' : '（未用視覺或失敗）'}
+              </dd>
+              <dt>強化第二輪</dt>
+              <dd>
+                {result.enhancementSecondPassUsed
+                  ? result.enhancementAppliedStepsZh.length > 0
+                    ? result.enhancementAppliedStepsZh.join(' → ')
+                    : '已請求但無適用步驟'
+                  : '未使用'}
+                {result.enhancementsRequested.edgeRefine ? <> （已勾邊緣強化）</> : null}
               </dd>
             </dl>
           ) : null}

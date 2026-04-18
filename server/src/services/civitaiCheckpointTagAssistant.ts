@@ -5,6 +5,11 @@ import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
 import type { CivitaiModelRow } from './civitaiModelRowMap.js'
 import { mergeHotCivitaiModelsByTagsAndQueries } from './civitaiSuggestModelsFromDescriptions.js'
+import {
+  parseAssistantResourceExtrasFromLlm,
+  resolveAssistantResourceExtras,
+} from './assistantResourceExtras.js'
+import type { AssistantResourceExtraResolved } from './assistantResourceExtrasTypes.js'
 import { getLocalModelsDump } from './localModelsDump.js'
 import { ollamaGenerateNonStream, ollamaGenerateStreamCollect } from './ollamaGenerate.js'
 
@@ -47,6 +52,8 @@ export type CheckpointTagAssistantResult = {
     searchQueries: string[]
   }
   recommendedModels: CivitaiModelRow[]
+  /** LoRA／Embedding／ControlNet 等條列；含 Civitai 可查之推薦（lora、textual_inversion）。 */
+  resourceExtras: AssistantResourceExtraResolved[]
 }
 
 export type PreparedCheckpointTagAssistantTurn = {
@@ -207,9 +214,14 @@ export async function prepareCheckpointTagAssistantTurn(
     '',
     'Task: respond to the LATEST user message (and attached image if any). Output ONE JSON object only, no markdown, no commentary.',
     'Keys exactly:',
-    '- "replyZh": Traditional Chinese reply to the user (concise, friendly, actionable; suggest which local filenames might fit when relevant).',
-    '- "modelTags": 1-6 strings — plausible Civitai MODEL tags in English (e.g. anime, photorealistic, fantasy, architecture, portrait).',
-    '- "searchQueries": 0-4 short English keyword phrases for Civitai name search when tags alone may miss.',
+    '- "replyZh": Traditional Chinese SHORT summary only (max ~220 characters): next step + tone; do NOT paste long tutorials here.',
+    '- "modelTags": 1-6 strings — plausible Civitai MODEL tags in English for CHECKPOINT discovery (e.g. anime, photorealistic, fantasy, architecture, portrait).',
+    '- "searchQueries": 0-4 short English keyword phrases for Civitai Checkpoint name search when tags alone may miss.',
+    '- "resourceExtras": array length 0-6. Each item explains ONE resource row the user should see (same content you would have put in a long reply).',
+    '  Each item: "kind" (one of: lora | textual_inversion | controlnet | workflow), "titleZh" (short Traditional Chinese heading), optional "detailZh" (1-3 short sentences, Traditional Chinese).',
+    '  For kind lora or textual_inversion you MUST also set "modelTags" (1-4 English Civitai model tags) and/or "searchQueries" (0-2 English phrases) so the server can query Civitai (types LORA or TextualInversion). Example LoRA tags: app design, flat design, vector, lineart.',
+    '  For controlnet or workflow use detailZh only; modelTags/searchQueries may be empty.',
+    'If you mention UI mockups, design LoRAs, negative embeddings, or ControlNet, you MUST represent them as separate resourceExtras rows (do not hide them only inside replyZh).',
     'Do not invent specific commercial model names as tags; prefer broad style/subject tags.',
   ].join('\n')
 
@@ -232,6 +244,7 @@ export async function completeCheckpointTagAssistantFromLlmRaw(
 ): Promise<{
   assistant: CheckpointTagAssistantResult['assistant']
   recommendedModels: CivitaiModelRow[]
+  resourceExtras: AssistantResourceExtraResolved[]
 }> {
   let parsed: unknown
   try {
@@ -262,9 +275,18 @@ export async function completeCheckpointTagAssistantFromLlmRaw(
     })
   }
 
+  const extraSpecs = parseAssistantResourceExtrasFromLlm(o)
+  const extraLimit = Math.min(4, prep.recommendLimit)
+  const resourceExtras = await resolveAssistantResourceExtras(env, extraSpecs, {
+    perSearchLimit: prep.perSearchLimit,
+    resultLimit: extraLimit,
+    nsfw: prep.nsfw,
+  })
+
   return {
     assistant: { replyZh, modelTags, searchQueries },
     recommendedModels,
+    resourceExtras,
   }
 }
 
@@ -291,7 +313,7 @@ export async function writeCheckpointTagAssistantChatStream(
     },
   })
 
-  const { assistant, recommendedModels } = await completeCheckpointTagAssistantFromLlmRaw(raw, env, prep)
+  const { assistant, recommendedModels, resourceExtras } = await completeCheckpointTagAssistantFromLlmRaw(raw, env, prep)
 
   await writeLine({
     type: 'final',
@@ -301,6 +323,7 @@ export async function writeCheckpointTagAssistantChatStream(
     localCheckpoints: prep.localCheckpoints,
     assistant,
     recommendedModels,
+    resourceExtras,
   })
 }
 
@@ -317,7 +340,7 @@ export async function runCheckpointTagAssistantChat(
     images: prep.imageB64 ? [prep.imageB64] : undefined,
   })
 
-  const { assistant, recommendedModels } = await completeCheckpointTagAssistantFromLlmRaw(raw, env, prep)
+  const { assistant, recommendedModels, resourceExtras } = await completeCheckpointTagAssistantFromLlmRaw(raw, env, prep)
 
   return {
     ollamaModel: prep.ollamaModel,
@@ -325,5 +348,6 @@ export async function runCheckpointTagAssistantChat(
     localCheckpoints: prep.localCheckpoints,
     assistant,
     recommendedModels,
+    resourceExtras,
   }
 }

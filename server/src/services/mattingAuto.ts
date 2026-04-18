@@ -9,13 +9,20 @@ import { classifyMattingImage, type MattingClassification } from './mattingClass
 import { decodeMattingImageBase64 } from './mattingImageBytes.js'
 import { removeBackgroundViaComfy } from './mattingComfyRun.js'
 import { removeBackgroundWithImgly } from './mattingLocalImgly.js'
-import { removeBackgroundWithRemoveBg } from './mattingRemoveBg.js'
 import { buildMattingExecutionPlan, type MattingPlanStep } from './mattingPickPlan.js'
+import {
+  anyMattingEnhancement,
+  applyMattingEnhancements,
+  parseMattingEnhancements,
+  type MattingEnhancements,
+} from './mattingEnhancements.js'
 
 export type MattingAutoBody = {
   imageBase64: string
   /** 覆寫讀圖分類用 Ollama 模型（須支援視覺較佳）；省略則用 `OLLAMA_SUMMARY_MODEL`。 */
   ollamaModel?: string
+  /** 強化：`edgeRefine: true` 時第一輪成功後再跑本機 ONNX 第二輪。 */
+  enhancements?: MattingEnhancements
 }
 
 export type MattingAutoResult = {
@@ -29,11 +36,24 @@ export type MattingAutoResult = {
   /** PNG，不含 data URL 前綴 */
   imagePngBase64: string
   warnings: string[]
+  /** 本次請求是否套用強化第二輪 */
+  enhancementSecondPassUsed: boolean
+  /** 已執行之強化步驟（繁中），無則空陣列 */
+  enhancementAppliedStepsZh: string[]
+  /** 請求帶入之強化勾選 */
+  enhancementsRequested: { edgeRefine: boolean }
 }
 
 function stepLabel(step: MattingPlanStep): string {
   if (step.kind === 'comfy') return `comfy:${step.comfyClassType ?? ''}`
   return step.kind
+}
+
+type FirstRoundOk = {
+  buf: Buffer
+  chosenExecutor: MattingPlanStep['kind']
+  chosenReasonZh: string
+  comfyNodeType: string | null
 }
 
 export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<MattingAutoResult> {
@@ -43,6 +63,10 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
   const b = body as MattingAutoBody
   const decoded = decodeMattingImageBase64(b.imageBase64)
   const imageB64ForVision = decoded.buffer.toString('base64')
+  const enhancements = parseMattingEnhancements(b.enhancements)
+  const enhancementsRequested = {
+    edgeRefine: enhancements.edgeRefine === true,
+  }
 
   let objectInfo: unknown | null = null
   try {
@@ -60,7 +84,6 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
 
   const caps = {
     comfyCandidates,
-    removeBg: Boolean(env.removeBgApiKey?.trim()),
     localOnnx: true,
   }
 
@@ -82,6 +105,8 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
   let lastMessage = ''
   const attemptErrors: { step: string; error: string }[] = []
 
+  let first: FirstRoundOk | null = null
+
   for (const step of plan) {
     tried.push(stepLabel(step))
     try {
@@ -93,51 +118,24 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
           image: decoded,
           classification: cls.classification,
         })
-        return {
-          classification: cls.classification,
+        first = {
+          buf,
           chosenExecutor: 'comfy',
           chosenReasonZh: step.reasonZh,
-          triedExecutors: tried,
           comfyNodeType: step.comfyClassType,
-          ollamaModelUsed: cls.modelUsed,
-          visionClassificationUsed: cls.usedVision,
-          imagePngBase64: buf.toString('base64'),
-          warnings,
         }
-      }
-
-      if (step.kind === 'remove_bg' && env.removeBgApiKey?.trim()) {
-        const buf = await removeBackgroundWithRemoveBg({
-          apiKey: env.removeBgApiKey.trim(),
-          imageBytes: decoded.buffer,
-          mime: decoded.mime,
-        })
-        return {
-          classification: cls.classification,
-          chosenExecutor: 'remove_bg',
-          chosenReasonZh: step.reasonZh,
-          triedExecutors: tried,
-          comfyNodeType: null,
-          ollamaModelUsed: cls.modelUsed,
-          visionClassificationUsed: cls.usedVision,
-          imagePngBase64: buf.toString('base64'),
-          warnings,
-        }
+        break
       }
 
       if (step.kind === 'local_onnx') {
         const buf = await removeBackgroundWithImgly(decoded)
-        return {
-          classification: cls.classification,
+        first = {
+          buf,
           chosenExecutor: 'local_onnx',
           chosenReasonZh: step.reasonZh,
-          triedExecutors: tried,
           comfyNodeType: null,
-          ollamaModelUsed: cls.modelUsed,
-          visionClassificationUsed: cls.usedVision,
-          imagePngBase64: buf.toString('base64'),
-          warnings,
         }
+        break
       }
     } catch (e) {
       lastMessage = e instanceof Error ? e.message : String(e)
@@ -146,13 +144,52 @@ export async function runMattingAuto(env: ServerEnv, body: unknown): Promise<Mat
     }
   }
 
-  throw new AppHttpError(
-    502,
-    lastMessage ? `所有摳圖後端皆失敗（最後錯誤：${lastMessage}）` : '所有摳圖後端皆失敗',
-    {
-      warnings,
-      attemptErrors,
-      triedExecutors: tried,
-    },
-  )
+  if (!first) {
+    throw new AppHttpError(
+      502,
+      lastMessage ? `所有摳圖後端皆失敗（最後錯誤：${lastMessage}）` : '所有摳圖後端皆失敗',
+      {
+        warnings,
+        attemptErrors,
+        triedExecutors: tried,
+      },
+    )
+  }
+
+  let outBuf = first.buf
+  let enhancementAppliedStepsZh: string[] = []
+  let enhancementSecondPassUsed = false
+
+  if (anyMattingEnhancement(enhancements)) {
+    try {
+      const r = await applyMattingEnhancements({
+        round1Png: first.buf,
+        enhancements,
+      })
+      outBuf = r.buffer
+      enhancementAppliedStepsZh = r.appliedStepsZh
+      enhancementSecondPassUsed = enhancementAppliedStepsZh.length > 0
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new AppHttpError(502, `強化第二輪失敗：${msg}`, {
+        warnings: [...warnings, `強化第二輪失敗：${msg}`],
+        triedExecutors: tried,
+      })
+    }
+  }
+
+  return {
+    classification: cls.classification,
+    chosenExecutor: first.chosenExecutor,
+    chosenReasonZh: first.chosenReasonZh,
+    triedExecutors: tried,
+    comfyNodeType: first.comfyNodeType,
+    ollamaModelUsed: cls.modelUsed,
+    visionClassificationUsed: cls.usedVision,
+    imagePngBase64: outBuf.toString('base64'),
+    warnings,
+    enhancementSecondPassUsed,
+    enhancementAppliedStepsZh,
+    enhancementsRequested,
+  }
 }

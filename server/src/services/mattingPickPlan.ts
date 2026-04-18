@@ -1,7 +1,7 @@
 import type { MattingClassification } from './mattingClassify.js'
 import type { MattingComfyCandidate } from './mattingComfyCaps.js'
 
-export type MattingExecutorKind = 'comfy' | 'remove_bg' | 'local_onnx'
+export type MattingExecutorKind = 'comfy' | 'local_onnx'
 
 export type MattingPlanStep = {
   kind: MattingExecutorKind
@@ -13,7 +13,6 @@ export type MattingPlanStep = {
 
 export type MattingCapabilities = {
   comfyCandidates: MattingComfyCandidate[]
-  removeBg: boolean
   localOnnx: boolean
 }
 
@@ -48,14 +47,6 @@ export function buildMattingExecutionPlan(
     )
   }
 
-  if (caps.removeBg && humanLike(classification) && (hardEdges(classification) || classification.preferQualityOverSpeed)) {
-    steps.push({
-      kind: 'remove_bg',
-      score: 88,
-      reasonZh: '人像且重視邊緣品質，使用 Remove.bg 雲端服務（已設定金鑰）。',
-    })
-  }
-
   if (comfyGeneral) {
     pushComfy(
       comfyGeneral,
@@ -66,14 +57,6 @@ export function buildMattingExecutionPlan(
 
   if (comfyFine && !steps.some((s) => s.kind === 'comfy' && s.comfyClassType === comfyFine.classType)) {
     pushComfy(comfyFine, 65, '使用 Comfy 精細摳圖節點處理此圖。')
-  }
-
-  if (caps.removeBg && !steps.some((s) => s.kind === 'remove_bg')) {
-    steps.push({
-      kind: 'remove_bg',
-      score: 55,
-      reasonZh: '已設定 Remove.bg，可作為高品質去背選項。',
-    })
   }
 
   if (caps.localOnnx) {

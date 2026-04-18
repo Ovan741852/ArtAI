@@ -1,4 +1,6 @@
 import type { CheckpointTagAssistantCivitaiModel } from './checkpointTagAssistant'
+import { parseAssistantResourceExtrasPayload, type AssistantResourceExtraOk } from './assistantResourceExtras'
+export type { AssistantResourceExtraOk } from './assistantResourceExtras'
 
 export type ModelBundleAssistantMessage = {
   role: 'user' | 'assistant'
@@ -28,6 +30,7 @@ export type ModelBundleAssistantOkData = {
     replyZh: string
   }
   bundles: ModelBundleAssistantBundleOk[]
+  resourceExtras: AssistantResourceExtraOk[]
 }
 
 function readStringArray(x: unknown): string[] {
@@ -104,10 +107,13 @@ export function parseModelBundleAssistantFinalPayload(o: Record<string, unknown>
   }
   if (bundles.length === 0) return null
 
+  const resourceExtras = parseAssistantResourceExtrasPayload(o.resourceExtras)
+
   return {
     ollamaModel,
     imageAttached,
     assistant: { replyZh },
     bundles,
+    resourceExtras,
   }
 }

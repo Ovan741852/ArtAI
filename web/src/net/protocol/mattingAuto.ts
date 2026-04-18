@@ -6,9 +6,13 @@ export type MattingClassification = {
   preferQualityOverSpeed: boolean
 }
 
+export type MattingEnhancementsRequest = {
+  edgeRefine?: boolean
+}
+
 export type MattingAutoOkData = {
   classification: MattingClassification
-  chosenExecutor: 'comfy' | 'remove_bg' | 'local_onnx'
+  chosenExecutor: 'comfy' | 'local_onnx'
   chosenReasonZh: string
   triedExecutors: string[]
   comfyNodeType: string | null
@@ -16,15 +20,20 @@ export type MattingAutoOkData = {
   visionClassificationUsed: boolean
   imagePngBase64: string
   warnings: string[]
+  enhancementSecondPassUsed: boolean
+  enhancementAppliedStepsZh: string[]
+  enhancementsRequested: { edgeRefine: boolean }
 }
 
 export class MattingAutoReq extends HttpRequest {
   private imageBase64 = ''
   private ollamaModel: string | undefined
+  private enhancements: MattingEnhancementsRequest | undefined
 
-  onAllocate(imageBase64: string, ollamaModel?: string): void {
+  onAllocate(imageBase64: string, ollamaModel?: string, enhancements?: MattingEnhancementsRequest): void {
     this.imageBase64 = imageBase64
     this.ollamaModel = ollamaModel?.trim() || undefined
+    this.enhancements = enhancements
   }
 
   get url(): string {
@@ -46,6 +55,9 @@ export class MattingAutoReq extends HttpRequest {
   get body(): string {
     const o: Record<string, unknown> = { imageBase64: this.imageBase64 }
     if (this.ollamaModel) o.ollamaModel = this.ollamaModel
+    if (this.enhancements?.edgeRefine === true) {
+      o.enhancements = { edgeRefine: true }
+    }
     return JSON.stringify(o)
   }
 }
@@ -67,8 +79,7 @@ export class MattingAutoRsp extends HttpPacket {
       const chosenReasonZh = o.chosenReasonZh
       const triedExecutors = o.triedExecutors
       const imagePngBase64 = o.imagePngBase64
-      const executorOk =
-        chosenExecutor === 'comfy' || chosenExecutor === 'remove_bg' || chosenExecutor === 'local_onnx'
+      const executorOk = chosenExecutor === 'comfy' || chosenExecutor === 'local_onnx'
       if (
         executorOk &&
         classification != null &&
@@ -82,6 +93,20 @@ export class MattingAutoRsp extends HttpPacket {
         const primarySubject = typeof cls.primarySubject === 'string' ? cls.primarySubject : ''
         const edgeDifficulty = typeof cls.edgeDifficulty === 'string' ? cls.edgeDifficulty : ''
         const preferQualityOverSpeed = typeof cls.preferQualityOverSpeed === 'boolean' ? cls.preferQualityOverSpeed : false
+
+        const enhancementSecondPassUsed = o.enhancementSecondPassUsed === true
+        const enhancementAppliedStepsZh = Array.isArray(o.enhancementAppliedStepsZh)
+          ? o.enhancementAppliedStepsZh.filter((x): x is string => typeof x === 'string')
+          : []
+        const er = o.enhancementsRequested
+        let enhancementsRequested = { edgeRefine: false }
+        if (er != null && typeof er === 'object') {
+          const r = er as Record<string, unknown>
+          enhancementsRequested = {
+            edgeRefine: r.edgeRefine === true,
+          }
+        }
+
         this.ok = true
         this.data = {
           classification: { primarySubject, edgeDifficulty, preferQualityOverSpeed },
@@ -93,6 +118,9 @@ export class MattingAutoRsp extends HttpPacket {
           visionClassificationUsed: Boolean(o.visionClassificationUsed),
           imagePngBase64,
           warnings: Array.isArray(o.warnings) ? o.warnings.filter((x): x is string => typeof x === 'string') : [],
+          enhancementSecondPassUsed,
+          enhancementAppliedStepsZh,
+          enhancementsRequested,
         }
       }
       return

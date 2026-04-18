@@ -80,11 +80,15 @@
 | `POST` | `/civitai/checkpoint/summary` | 依**單一**本機 checkpoint 檔名搜尋 Civitai、擷取描述與版本資訊後，交給本機 **Ollama** 產生**英文**用法摘要。Body：`{ "checkpoint": "foo.safetensors", "ollamaModel"?: "…", "searchQuery"?: "…" }`。 |
 | `POST` | `/civitai/models/suggest-from-descriptions` | 依多則畫面描述交 **Ollama** 推斷 Civitai 用 `tag`／`query` 搜尋用的字串，再以官方 `GET /api/v1/models` 依 **Most Downloaded + AllTime** 合併去重，回傳最熱門的模型列表（預設 5 筆）。Body：`{ "descriptions": "…" \| string[], "ollamaModel"?: "…", "types"?: "Checkpoint", "nsfw"?: boolean, "perSearchLimit"?: number, "limit"?: number }`。 |
 | `POST` | `/civitai/checkpoint/tag-assistant/chat` | **Checkpoint 需求助手（多輪，一次回 JSON）**：與 `chat-stream` 相同邏輯但以單一 JSON 回應（無串流）。Body 與 `chat-stream` 相同。 |
-| `POST` | `/civitai/checkpoint/tag-assistant/chat-stream` | **Checkpoint 需求助手（NDJSON 串流）**：Body 與 `…/chat` 相同。回應 **`Content-Type: application/x-ndjson`**，每行一個 JSON：① `{ "type": "delta", "text": "…" }`（Ollama 產生片段）；② `{ "type": "final", "ok": true, … }` 欄位與非串流成功 JSON 一致（`ollamaModel`、`imageAttached`、`localCheckpoints`、`assistant`、`recommendedModels`）；③ `{ "type": "error", "ok": false, "message": "…" }`。先驗證 body 失敗時仍回 **一般 JSON**（400／502）而非串流。 |
+| `POST` | `/civitai/checkpoint/tag-assistant/chat-stream` | **Checkpoint 需求助手（NDJSON 串流）**：Body 與 `…/chat` 相同。回應 **`Content-Type: application/x-ndjson`**，每行一個 JSON：① `{ "type": "delta", "text": "…" }`（Ollama 產生片段）；② `{ "type": "final", "ok": true, … }` 欄位與非串流成功 JSON 一致（`ollamaModel`、`imageAttached`、`localCheckpoints`、`assistant`、`recommendedModels`、**`resourceExtras`**）；③ `{ "type": "error", "ok": false, "message": "…" }`。先驗證 body 失敗時仍回 **一般 JSON**（400／502）而非串流。 |
 | `POST` | `/civitai/model-bundles/assistant/chat` | **模型套組採購助手（多輪，一次回 JSON）**：見下方「模型套組採購助手」小節之 Body 與回應欄位；無串流。 |
 | `POST` | `/civitai/model-bundles/assistant/chat-stream` | **模型套組採購助手（NDJSON 串流）**：Body 與 `…/chat` 相同；`delta`／`final`／`error` 列格式同其他 NDJSON 端點。 |
 | `GET` | `/civitai/models/search` | 關鍵字搜尋 Civitai `GET /api/v1/models`。必填其一：`query` 或 `tag`。可選：`types`、`sort`、`period`、`baseModels`、`limit`、`nsfw`；`summarize=1` 時會用 Ollama 總結前幾筆。 |
 | `GET` | `/civitai/models/:id` | 依數字模型 ID 取得 Civitai `GET /api/v1/models/{id}`，回傳精簡後的 `model` 物件（description 去 HTML、含版本預覽等）。 |
+
+### Checkpoint 需求助手（`resourceExtras`）
+
+非串流／串流 `final` 除 `assistant`、`recommendedModels`（Checkpoint）外，另含 **`resourceExtras`**：陣列（最多 6 筆），每筆為 `{ "kind": "lora" \| "textual_inversion" \| "controlnet" \| "workflow", "titleZh": string, "detailZh"?: string, "modelTags"?: string[], "searchQueries"?: string[], "recommendedModels": … }`。Ollama 在 JSON 內填寫 `kind`／`titleZh`／`detailZh` 與（若適用）英文 `modelTags`／`searchQueries`；伺服器對 **`lora`**、**`textual_inversion`** 以 Civitai `types=LORA` 或 `TextualInversion` 合併搜尋後寫入 `recommendedModels`；**`controlnet`**、**`workflow`** 通常僅有說明文字，無 Civitai 列。
 
 ### 模型套組採購助手（Ollama + Civitai）
 
@@ -107,6 +111,7 @@
   - `titleZh`、`noteZh`（選填，字串）
   - `checkpoint`：`modelTags`、`searchQueries`、`recommendedModels`（與 tag 助手推薦列相同精簡形狀之陣列）
   - `loras`：陣列（至少一筆；可能含伺服器依 checkpoint 自動補的 slot），元素同 `checkpoint` 欄位結構（搜尋結果為 LoRA）
+- `resourceExtras`：與上節 **Checkpoint 需求助手**之 `resourceExtras` 形狀相同（可為空陣列）；用於套組以外的延伸條列（如 ControlNet 說明、額外 LoRA 主題），`lora`／`textual_inversion` 列會附 Civitai 搜尋結果。
 
 **串流 `POST /civitai/model-bundles/assistant/chat-stream`：** 回應 **`Content-Type: application/x-ndjson`**。每行一個 JSON：① `{ "type": "delta", "text": "…" }`；② `{ "type": "final", "ok": true, … }` 欄位與非串流成功 JSON 一致；③ `{ "type": "error", "ok": false, "message": "…" }`。先驗證 body 失敗時仍回 **一般 JSON**（400／502）而非串流。
 
@@ -134,27 +139,31 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 
 ## 圖像摳圖（自動）
 
-上傳一張圖後，伺服器會以 **Ollama 視覺模型**（若可用）讀圖並做簡短分類，再依 **本機 ComfyUI 已安裝節點**、**Remove.bg**（選填金鑰）、**本機 ONNX（@imgly/background-removal）** 的可用性排出優先序，**依序嘗試**直到成功為止。
+上傳一張圖後，伺服器會以 **Ollama 視覺模型**（若可用）讀圖並做簡短分類，再依 **本機 ComfyUI 已安裝節點**、**本機 ONNX（@imgly/background-removal）** 排出優先序，**依序嘗試**直到成功為止。
 
 **Body（`POST /images/matting/auto`）：**
 
 - `imageBase64`（必填）：base64 圖檔；可含 `data:image/png;base64,` 前綴。解碼後上限 **8 MB**。支援常見 **PNG／JPEG／WebP** 魔數。
 - `ollamaModel`（選填）：讀圖分類用模型；須為 Ollama 支援**視覺**者較佳。省略時使用 `OLLAMA_SUMMARY_MODEL`。若視覺呼叫失敗，分類會退回預設並於 `warnings` 附註（仍會繼續摳圖）。
+- `enhancements`（選填）：物件。`edgeRefine: true` 時，第一輪成功後會再以 **本機 ONNX** 對結果圖跑 **第二輪**（邊緣／半透明邊修飾）。省略或 `false` 則僅一輪。
 
 **成功 JSON：** `ok: true` 外加：
 
 - `classification`：`primarySubject`（`single_human_portrait` \| `multiple_humans` \| `product_object` \| `scene_mixed`）、`edgeDifficulty`（`simple` \| `moderate` \| `hard`）、`preferQualityOverSpeed`（boolean）。
-- `chosenExecutor`：`comfy` \| `remove_bg` \| `local_onnx`（實際成功的那一個）。
+- `chosenExecutor`：`comfy` \| `local_onnx`（實際成功的那一個）。
 - `chosenReasonZh`：繁中簡短說明為何選此路徑。
-- `triedExecutors`：嘗試順序標籤（例如 `comfy:某節點類名`、`remove_bg`、`local_onnx`）。
+- `triedExecutors`：嘗試順序標籤（例如 `comfy:某節點類名`、`local_onnx`）。
 - `comfyNodeType`：成功且為 Comfy 時為該次使用的 `class_type` 字串；否則 `null`。
 - `ollamaModelUsed`、`visionClassificationUsed`（boolean）。
 - `imagePngBase64`：結果 **PNG**（透明背景），純 base64、**無** data URL 前綴。
 - `warnings`：字串陣列（例如後端失敗改試下一個時的提示）。
+- `enhancementSecondPassUsed`（boolean）：是否實際執行過至少一步強化第二輪。
+- `enhancementAppliedStepsZh`：字串陣列，已執行之強化步驟繁中說明（無第二輪時為 `[]`）。
+- `enhancementsRequested`：`{ edgeRefine }` 布林（未帶 `enhancements` 則 `edgeRefine: false`）。
 
-**Comfy 偵測：** 伺服器讀取快取之 **`GET /comfy/object_info`** 同源資料；若節點型別名稱符合內建關鍵字（精細類：如 BiRefNet／isnet…；一般類：如 rembg／remove background…），且該節點在 `object_info` 之 **`input.required` 恰好一個 `IMAGE`**、其餘必填皆為可自動填之型別（`BOOLEAN`／`INT`／`FLOAT`／`STRING`／選項下拉），才會納入 Comfy 候選。**需要額外連線的型別**（例如 `rembg_session` 的 `ImageRemoveBackground+`）會排除，改試下一後端。節點名稱不含關鍵字者不會被選用（仍可走 Remove.bg 或本機 ONNX）。
+**Comfy 偵測：** 伺服器讀取快取之 **`GET /comfy/object_info`** 同源資料；若節點型別名稱符合內建關鍵字（精細類：如 BiRefNet／isnet…；一般類：如 rembg／remove background…），且該節點在 `object_info` 之 **`input.required` 恰好一個 `IMAGE`**、其餘必填皆為可自動填之型別（`BOOLEAN`／`INT`／`FLOAT`／`STRING`／選項下拉），才會納入 Comfy 候選。**需要額外連線的型別**（例如 `rembg_session` 的 `ImageRemoveBackground+`）會排除，改試下一後端。節點名稱不含關鍵字者不會被選用（仍可走本機 ONNX）。
 
-**錯誤：** Body 無效 **400**；無任何可用後端 **500**；所有候選皆失敗 **502**（JSON 除 `message` 外可含 **`warnings`** 字串陣列、**`attemptErrors`**：`{ step, error }[]`、**`triedExecutors`** 字串陣列，方便客戶端顯示而不必讀 Comfy／Docker log）。
+**錯誤：** Body 無效 **400**；無任何可用後端 **500**；所有候選皆失敗 **502**；第一輪成功但 **強化第二輪** 拋錯亦為 **502**（`message` 以「強化第二輪失敗：…」開頭）。一般 **502** JSON 除 `message` 外可含 **`warnings`**、**`attemptErrors`**、**`triedExecutors`**。
 
 | 方法 | 路徑 | 用途 |
 |------|------|------|
@@ -184,6 +193,5 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 | `LOCAL_MODELS_DUMP_TTL_MS` | `GET /models/local/dump` 記憶體快取 TTL（毫秒）；預設 `30000`，設 `0` 表示每次請求皆重新抓取。 |
 | `COMFY_OBJECT_INFO_TTL_MS` | `GET /comfy/object_info` 記憶體快取 TTL（毫秒）；未設定時預設與 **`LOCAL_MODELS_DUMP_TTL_MS`** 相同（再未設定則 `30000`）；`0` 表示每次請求皆轉呼 ComfyUI。 |
 | `WORKFLOW_TEMPLATES_DIR` | Workflow 模板 JSON 目錄（選填）；預設為執行時 `cwd` 下 **`data/workflow-templates`**。 |
-| `REMOVE_BG_API_KEY` | Remove.bg API Key（選填）；若設定且分類適用，會列入高品質雲端去背候選。 |
 
 CORS：生產環境可設定 `ALLOWED_ORIGINS`（逗號分隔）。

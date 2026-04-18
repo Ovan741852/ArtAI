@@ -1,4 +1,6 @@
 import { HttpPacket, HttpRequest } from '../http/types'
+import { parseAssistantResourceExtrasPayload, type AssistantResourceExtraOk } from './assistantResourceExtras'
+export type { AssistantResourceExtraOk } from './assistantResourceExtras'
 
 export type CheckpointTagAssistantMessage = {
   role: 'user' | 'assistant'
@@ -30,6 +32,7 @@ export type CheckpointTagAssistantOkData = {
     searchQueries: string[]
   }
   recommendedModels: CheckpointTagAssistantCivitaiModel[]
+  resourceExtras: AssistantResourceExtraOk[]
 }
 
 function readStringArray(x: unknown): string[] {
@@ -151,6 +154,7 @@ export class CheckpointTagAssistantChatRsp extends HttpPacket {
       localCheckpoints: parseLocalRows(o.localCheckpoints),
       assistant: { replyZh, modelTags, searchQueries },
       recommendedModels: parseRecommended(o.recommendedModels),
+      resourceExtras: parseAssistantResourceExtrasPayload(o.resourceExtras),
     }
   }
 }

@@ -7,7 +7,7 @@ export function createMattingAutoRoutes(env: ServerEnv) {
   const r = new Hono()
 
   /**
-   * 讀圖 → Ollama 視覺分類 → 依可用後端（Comfy 自訂節點 / Remove.bg / 本機 ONNX）自動摳圖。
+   * 讀圖 → Ollama 視覺分類 → 依可用後端（Comfy 自訂節點／本機 ONNX）自動摳圖。
    * Body: `{ "imageBase64": "…", "ollamaModel"?: "…" }`
    */
   r.post('/images/matting/auto', async (c) => {
