@@ -26,6 +26,11 @@ export type ServerEnv = {
   civitaiApiKey: string | undefined
   /** 呼叫 Ollama `/api/generate` 做摘要時的預設模型名。 */
   ollamaSummaryModel: string
+  /**
+   * `GET /models/local/dump` 記憶體快取 TTL（毫秒）。`0` 表示每次請求都重新抓取。
+   * 環境變數：`LOCAL_MODELS_DUMP_TTL_MS`（預設 30000）。
+   */
+  localModelsDumpTtlMs: number
 }
 
 function parsePort(raw: string | undefined, fallback: number): number {
@@ -33,6 +38,13 @@ function parsePort(raw: string | undefined, fallback: number): number {
   const n = Number(raw)
   if (!Number.isInteger(n) || n <= 0 || n > 65535) return fallback
   return n
+}
+
+function parseNonNegativeInt(raw: string | undefined, fallback: number): number {
+  if (raw == null || raw.trim() === '') return fallback
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return fallback
+  return Math.floor(n)
 }
 
 function parseAllowedOrigins(raw: string | undefined): string[] {
@@ -90,5 +102,6 @@ export function loadServerEnv(): ServerEnv {
       process.env.CIVITAI_API_TOKEN?.trim() ||
       undefined,
     ollamaSummaryModel: process.env.OLLAMA_SUMMARY_MODEL?.trim() || 'llama3.2',
+    localModelsDumpTtlMs: parseNonNegativeInt(process.env.LOCAL_MODELS_DUMP_TTL_MS, 30_000),
   }
 }

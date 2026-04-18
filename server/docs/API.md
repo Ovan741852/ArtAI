@@ -55,6 +55,16 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 
 ---
 
+## 本機模型彙整（Dump）
+
+一次取得 **ComfyUI checkpoints**、**Ollama 已安裝模型**、以及本機 **checkpoint 目錄 JSON**（與 `GET /catalog/checkpoints` 同源之摘要欄位）。並回傳 **`refreshedAt`**：上次成功建立此快照的時間（ISO 8601）；若命中記憶體快取則 **`fromCache`: true**，`refreshedAt` 仍為該快取建立當下的時間。
+
+| 方法 | 路徑 | 用途 |
+|------|------|------|
+| `GET` | `/models/local/dump` | 回傳 `sources`（comfyui / ollama / checkpointCatalog）、`summary` 計數、**`refreshedAt`**、**`fromCache`**、**`staleAt`**（快取預計過期之 UTC 時間，TTL 為 0 時為 null）。Query：`force=1` 時略過快取並重新抓取 ComfyUI 與 Ollama。 |
+
+---
+
 ## Demo
 
 | 方法 | 路徑 | 用途 |
@@ -74,5 +84,6 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 | `CIVITAI_BASE_URL` | 預設 `https://civitai.com`。 |
 | `CIVITAI_API_KEY` | Civitai API Token（選填）。 |
 | `OWNED_CHECKPOINTS_STORE` | 本機 checkpoint 目錄 JSON 路徑（選填，預設為執行時 `cwd` 下 `data/owned-checkpoints.json`）。 |
+| `LOCAL_MODELS_DUMP_TTL_MS` | `GET /models/local/dump` 記憶體快取 TTL（毫秒）；預設 `30000`，設 `0` 表示每次請求皆重新抓取。 |
 
 CORS：生產環境可設定 `ALLOWED_ORIGINS`（逗號分隔）。
