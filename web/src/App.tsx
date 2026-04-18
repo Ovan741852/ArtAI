@@ -1,5 +1,6 @@
 import './App.css'
 import { useCallback, useState } from 'react'
+import { CheckpointTagAssistantWindow } from './checkpointTagAssistant/CheckpointTagAssistantWindow'
 import { LocalModelsDumpWindow } from './localModelsDump/LocalModelsDumpWindow'
 import { DemoEchoReq, DemoEchoRsp, createDefaultHttpClient } from './net'
 import { useHelloStore } from './store/useHelloStore'
@@ -41,6 +42,7 @@ function App() {
           <code>{netPreview}</code>
         </pre>
       ) : null}
+      <CheckpointTagAssistantWindow />
       <LocalModelsDumpWindow />
     </main>
   )

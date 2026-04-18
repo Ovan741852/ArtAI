@@ -9,6 +9,7 @@ import { createComfyCheckpointRoutes } from '../routes/comfyCheckpoints.js'
 import { createOllamaModelRoutes } from '../routes/ollamaModels.js'
 import { createCivitaiCheckpointSummaryRoutes } from '../routes/civitaiCheckpointSummary.js'
 import { createCivitaiModelsSearchRoutes } from '../routes/civitaiModelsSearch.js'
+import { createCivitaiCheckpointTagAssistantRoutes } from '../routes/civitaiCheckpointTagAssistant.js'
 import { createCatalogCheckpointRoutes } from '../routes/catalogCheckpoints.js'
 import { createLocalModelsDumpRoutes } from '../routes/localModelsDump.js'
 
@@ -30,6 +31,7 @@ export function createApp(env: ServerEnv): Hono {
   app.route('/', createOllamaModelRoutes(env))
   app.route('/', createCivitaiCheckpointSummaryRoutes(env))
   app.route('/', createCivitaiModelsSearchRoutes(env))
+  app.route('/', createCivitaiCheckpointTagAssistantRoutes(env))
   app.route('/', createCatalogCheckpointRoutes(env))
   app.route('/', createLocalModelsDumpRoutes(env))
 

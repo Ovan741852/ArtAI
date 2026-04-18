@@ -167,6 +167,23 @@
   min-width: 0;
 }
 
+.dump__ck-cknt .cknt__row {
+  margin-bottom: 6px;
+}
+
+.dump__ck-cknt .cknt__name {
+  font-weight: 500;
+}
+
+.dump__entry-cknt {
+  margin-bottom: 10px;
+}
+
+.dump__entry-cknt .cknt__caption {
+  font-weight: 500;
+  color: var(--text-h);
+}
+
 .dump__ck-fileline {
   display: flex;
   flex-wrap: wrap;

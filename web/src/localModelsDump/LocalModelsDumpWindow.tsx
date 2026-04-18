@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CheckpointNameTags } from '../components/checkpoint/CheckpointNameTags'
 import {
   CatalogSyncFromComfyReq,
   CatalogSyncFromComfyRsp,
@@ -171,47 +172,41 @@ export function LocalModelsDumpWindow() {
                     <li key={name}>
                       <div className="dump__ck-row">
                         <div className="dump__ck-tags-wrap">
-                          <div className="dump__ck-fileline">
-                            <span className="dump__ck-name">{name}</span>
-                            <button
-                              type="button"
-                              className="dump__ck-summary-btn"
-                              disabled={!canModal}
-                              title={
-                                canModal
-                                  ? 'Open Civitai description & metadata'
-                                  : 'Sync catalog below to attach Civitai metadata'
-                              }
-                              onClick={() => {
-                                if (!cat) return
-                                setCkModal({
-                                  filename: name,
-                                  modelName: cat.civitaiModelName ?? null,
-                                  description: desc,
-                                  trainedWords: trained,
-                                  baseModel: cat.civitaiBaseModel ?? null,
-                                  creator: cat.civitaiCreatorUsername ?? null,
-                                })
-                              }}
-                            >
-                              Summary
-                            </button>
-                          </div>
-                          {tags.length > 0 ? (
-                            <div className="dump__tags" aria-label="Tags">
-                              {tags.map((t) => (
-                                <span key={t} className="dump__tag">
-                                  {t}
-                                </span>
-                              ))}
-                            </div>
-                          ) : cat ? (
-                            <p className="dump__muted">(no tags)</p>
-                          ) : (
-                            <p className="dump__muted">
-                              （無目錄條目 — 至下方「Checkpoint 目錄」按「同步 checkpoint 目錄」）
-                            </p>
-                          )}
+                          <CheckpointNameTags
+                            className="dump__ck-cknt"
+                            name={name}
+                            tags={tags}
+                            emptyHint={
+                              cat
+                                ? '(no tags)'
+                                : '（無目錄條目 — 至下方「Checkpoint 目錄」按「同步 checkpoint 目錄」）'
+                            }
+                            trailing={
+                              <button
+                                type="button"
+                                className="dump__ck-summary-btn"
+                                disabled={!canModal}
+                                title={
+                                  canModal
+                                    ? 'Open Civitai description & metadata'
+                                    : 'Sync catalog below to attach Civitai metadata'
+                                }
+                                onClick={() => {
+                                  if (!cat) return
+                                  setCkModal({
+                                    filename: name,
+                                    modelName: cat.civitaiModelName ?? null,
+                                    description: desc,
+                                    trainedWords: trained,
+                                    baseModel: cat.civitaiBaseModel ?? null,
+                                    creator: cat.civitaiCreatorUsername ?? null,
+                                  })
+                                }}
+                              >
+                                Summary
+                              </button>
+                            }
+                          />
                         </div>
                       </div>
                     </li>
@@ -276,12 +271,13 @@ export function LocalModelsDumpWindow() {
                   const trained = catalogEntryTrained(e)
                   return (
                     <article key={`${e.localFilename}-${e.civitaiModelId}`} className="dump__entry">
-                      <header className="dump__entry-head">
-                        <strong className="dump__entry-file">{e.localFilename}</strong>
-                        {e.civitaiModelName ? (
-                          <span className="dump__entry-title"> — {e.civitaiModelName}</span>
-                        ) : null}
-                      </header>
+                      <CheckpointNameTags
+                        className="dump__entry-cknt"
+                        name={e.localFilename}
+                        tags={tags}
+                        caption={e.civitaiModelName ? `— ${e.civitaiModelName}` : null}
+                        emptyHint="(no tags)"
+                      />
                       {e.civitaiCreatorUsername ? (
                         <p className="dump__entry-meta">
                           <span className="dump__label-en">Creator</span> {e.civitaiCreatorUsername}
@@ -292,17 +288,6 @@ export function LocalModelsDumpWindow() {
                           <span className="dump__label-en">Base model</span> {e.civitaiBaseModel}
                         </p>
                       ) : null}
-                      {tags.length > 0 ? (
-                        <div className="dump__tags" aria-label="Tags">
-                          {tags.map((t) => (
-                            <span key={t} className="dump__tag">
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="dump__muted">(no tags)</p>
-                      )}
                       {trained.length > 0 ? (
                         <p className="dump__entry-meta">
                           <span className="dump__label-en">Trained words</span> {trained.join(', ')}

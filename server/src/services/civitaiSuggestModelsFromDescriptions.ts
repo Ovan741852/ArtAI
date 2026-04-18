@@ -48,8 +48,61 @@ function downloadCount(item: CivitaiModelItem): number {
   return 0
 }
 
-const SORT_HOT = 'Most Downloaded'
-const PERIOD_ALL = 'AllTime'
+export const CIVITAI_SORT_MOST_DOWNLOADED = 'Most Downloaded' as const
+export const CIVITAI_PERIOD_ALL_TIME = 'AllTime' as const
+
+/**
+ * 依 LLM 產生的 tag／query 向 Civitai 搜尋，合併去重後依下載量排序取前 N 筆（與 suggest-from-descriptions 相同策略）。
+ */
+export async function mergeHotCivitaiModelsByTagsAndQueries(
+  env: ServerEnv,
+  input: {
+    modelTags: string[]
+    searchQueries: string[]
+    perSearchLimit: number
+    resultLimit: number
+    types?: string
+    nsfw: boolean
+  },
+): Promise<CivitaiModelRow[]> {
+  const perSearchLimit = Math.min(100, Math.max(1, Math.floor(input.perSearchLimit)))
+  const resultLimit = Math.min(20, Math.max(1, Math.floor(input.resultLimit)))
+  const types = input.types?.trim() || undefined
+  const nsfw = input.nsfw
+
+  const baseSearch = {
+    civitaiBaseUrl: env.civitaiBaseUrl,
+    apiKey: env.civitaiApiKey,
+    sort: CIVITAI_SORT_MOST_DOWNLOADED,
+    period: CIVITAI_PERIOD_ALL_TIME,
+    limit: perSearchLimit,
+    types,
+    nsfw,
+  }
+
+  const byId = new Map<number, CivitaiModelItem>()
+
+  const runSearch = async (partial: { tag?: string; query?: string }) => {
+    const { items } = await searchCivitaiModels({ ...baseSearch, ...partial })
+    for (const it of items) {
+      if (!byId.has(it.id)) byId.set(it.id, it)
+    }
+  }
+
+  for (const tag of input.modelTags) {
+    await runSearch({ tag })
+  }
+
+  if (byId.size < resultLimit) {
+    for (const query of input.searchQueries) {
+      if (byId.size >= resultLimit * 3) break
+      await runSearch({ query })
+    }
+  }
+
+  const merged = [...byId.values()].sort((a, b) => downloadCount(b) - downloadCount(a))
+  return merged.slice(0, resultLimit).map(mapCivitaiModelRow)
+}
 
 export type SuggestModelsFromDescriptionsResult = {
   descriptionsUsed: string
@@ -59,8 +112,8 @@ export type SuggestModelsFromDescriptionsResult = {
     searchQueries: string[]
   }
   civitaiFilters: {
-    sort: typeof SORT_HOT
-    period: typeof PERIOD_ALL
+    sort: typeof CIVITAI_SORT_MOST_DOWNLOADED
+    period: typeof CIVITAI_PERIOD_ALL_TIME
     types: string | null
     nsfw: boolean
   }
@@ -128,44 +181,25 @@ export async function runSuggestModelsFromDescriptions(
     throw new AppHttpError(502, 'LLM returned no modelTags and no searchQueries')
   }
 
-  const baseSearch = {
-    civitaiBaseUrl: env.civitaiBaseUrl,
-    apiKey: env.civitaiApiKey,
-    sort: SORT_HOT,
-    period: PERIOD_ALL,
-    limit: perSearchLimit,
+  const top = await mergeHotCivitaiModelsByTagsAndQueries(env, {
+    modelTags,
+    searchQueries,
+    perSearchLimit,
+    resultLimit,
     types,
     nsfw,
-  }
-
-  const byId = new Map<number, CivitaiModelItem>()
-
-  const runSearch = async (partial: { tag?: string; query?: string }) => {
-    const { items } = await searchCivitaiModels({ ...baseSearch, ...partial })
-    for (const it of items) {
-      if (!byId.has(it.id)) byId.set(it.id, it)
-    }
-  }
-
-  for (const tag of modelTags) {
-    await runSearch({ tag })
-  }
-
-  if (byId.size < resultLimit) {
-    for (const query of searchQueries) {
-      if (byId.size >= resultLimit * 3) break
-      await runSearch({ query })
-    }
-  }
-
-  const merged = [...byId.values()].sort((a, b) => downloadCount(b) - downloadCount(a))
-  const top = merged.slice(0, resultLimit).map(mapCivitaiModelRow)
+  })
 
   return {
     descriptionsUsed,
     ollamaModel,
     llm: { modelTags, searchQueries },
-    civitaiFilters: { sort: SORT_HOT, period: PERIOD_ALL, types: types ?? null, nsfw },
+    civitaiFilters: {
+      sort: CIVITAI_SORT_MOST_DOWNLOADED,
+      period: CIVITAI_PERIOD_ALL_TIME,
+      types: types ?? null,
+      nsfw,
+    },
     models: top,
   }
 }

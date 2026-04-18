@@ -17,8 +17,23 @@ export class FetchHttpTransport implements IHttpTransport {
 
     if (!res.ok) {
       const kind = 'http' as const
-      const message = `HTTP ${res.status}: ${res.statusText}`
-      throw { kind, message, status: res.status }
+      let detail = res.statusText || 'Request failed'
+      const ct = res.headers.get('content-type') ?? ''
+      try {
+        const rawText = await res.text()
+        if (ct.includes('application/json') && rawText.trim()) {
+          const j = JSON.parse(rawText) as unknown
+          if (j != null && typeof j === 'object' && 'message' in j) {
+            const m = (j as { message?: unknown }).message
+            if (typeof m === 'string' && m.trim()) detail = m.trim()
+          }
+        } else if (rawText.trim() && rawText.length < 400) {
+          detail = rawText.trim().slice(0, 400)
+        }
+      } catch {
+        /* keep detail */
+      }
+      throw { kind, message: `HTTP ${String(res.status)}: ${detail}`, status: res.status }
     }
 
     if (req.responseType === 'json') {

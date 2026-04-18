@@ -40,6 +40,7 @@
 |------|------|------|
 | `POST` | `/civitai/checkpoint/summary` | 依**單一**本機 checkpoint 檔名搜尋 Civitai、擷取描述與版本資訊後，交給本機 **Ollama** 產生**英文**用法摘要。Body：`{ "checkpoint": "foo.safetensors", "ollamaModel"?: "…", "searchQuery"?: "…" }`。 |
 | `POST` | `/civitai/models/suggest-from-descriptions` | 依多則畫面描述交 **Ollama** 推斷 Civitai 用 `tag`／`query` 搜尋用的字串，再以官方 `GET /api/v1/models` 依 **Most Downloaded + AllTime** 合併去重，回傳最熱門的模型列表（預設 5 筆）。Body：`{ "descriptions": "…" \| string[], "ollamaModel"?: "…", "types"?: "Checkpoint", "nsfw"?: boolean, "perSearchLimit"?: number, "limit"?: number }`。 |
+| `POST` | `/civitai/checkpoint/tag-assistant/chat` | **Checkpoint 需求助手（多輪）**：伺服器讀取與 `GET /models/local/dump` 相同來源之本機 Comfy checkpoint 檔名與目錄內 **Civitai tags**（命中快取時不重抓 Comfy），將清單與對話一併交 **Ollama**；模型回傳 JSON（`replyZh` 繁中、`modelTags`／`searchQueries` 英文）後，再以 `types=Checkpoint` 向 Civitai 合併搜尋並回傳 **`recommendedModels`**。Body：`{ "messages": [{ "role": "user" \| "assistant", "content": "…" }], … }`（**最後一則須為 user**）。可選：`ollamaModel`、`recommendLimit`（預設 5）、`perSearchLimit`、`nsfw`、**`imageBase64`**（單張參考圖 base64，可含 `data:image/...;base64,` 前綴；解碼後 ≤8MB；走 Ollama `images` 欄位，**須使用支援視覺的模型**如 llava）。若帶圖，最後一則 user 的 `content` 可為空字串。成功時回傳含 **`imageAttached`**（boolean）。 |
 | `GET` | `/civitai/models/search` | 關鍵字搜尋 Civitai `GET /api/v1/models`。必填其一：`query` 或 `tag`。可選：`types`、`sort`、`period`、`baseModels`、`limit`、`nsfw`；`summarize=1` 時會用 Ollama 總結前幾筆。 |
 | `GET` | `/civitai/models/:id` | 依數字模型 ID 取得 Civitai `GET /api/v1/models/{id}`，回傳精簡後的 `model` 物件（description 去 HTML、含版本預覽等）。 |
 
