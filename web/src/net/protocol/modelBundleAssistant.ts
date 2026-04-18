@@ -26,6 +26,7 @@ export type ModelBundleAssistantBundleOk = {
 export type ModelBundleAssistantOkData = {
   ollamaModel: string
   imageAttached: boolean
+  attachedImageCount: number
   assistant: {
     replyZh: string
   }
@@ -94,6 +95,13 @@ export function parseModelBundleAssistantFinalPayload(o: Record<string, unknown>
   if (o.ok !== true) return null
   const ollamaModel = typeof o.ollamaModel === 'string' ? o.ollamaModel : ''
   const imageAttached = o.imageAttached === true
+  const attachedRaw = o.attachedImageCount
+  const attachedImageCount =
+    typeof attachedRaw === 'number' && Number.isFinite(attachedRaw)
+      ? Math.max(0, Math.floor(attachedRaw))
+      : imageAttached
+        ? 1
+        : 0
   const assistantRaw = o.assistant
   if (!assistantRaw || typeof assistantRaw !== 'object') return null
   const a = assistantRaw as Record<string, unknown>
@@ -112,6 +120,7 @@ export function parseModelBundleAssistantFinalPayload(o: Record<string, unknown>
   return {
     ollamaModel,
     imageAttached,
+    attachedImageCount,
     assistant: { replyZh },
     bundles,
     resourceExtras,

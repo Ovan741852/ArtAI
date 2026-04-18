@@ -1,5 +1,5 @@
-import { Buffer } from 'node:buffer'
 import type { ServerEnv } from '../config/env.js'
+import { readOptionalAssistantReplyLine } from '../lib/assistantLlmUserReply.js'
 import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
@@ -11,6 +11,7 @@ import {
 } from './assistantResourceExtras.js'
 import type { AssistantResourceExtraResolved } from './assistantResourceExtrasTypes.js'
 import { ollamaGenerateNonStream, ollamaGenerateStreamCollect } from './ollamaGenerate.js'
+import { parseOllamaVisionImagesFromBody } from './ollamaVisionImagesFromBody.js'
 
 export type ModelBundleAssistantRole = 'user' | 'assistant'
 
@@ -31,6 +32,8 @@ export type ModelBundleAssistantBody = {
    * 解碼後上限 8MB。
    */
   imageBase64?: string
+  /** 多張參考圖；與 `imageBase64` 併用時順序為 `[單張, ...陣列]`。 */
+  imageBase64s?: string[]
 }
 
 /** LLM 產出之單一搜尋 slot（僅 tags／queries，尚無 Civitai 結果）。 */
@@ -60,6 +63,7 @@ export type ModelBundleResolved = {
 export type ModelBundleAssistantResult = {
   ollamaModel: string
   imageAttached: boolean
+  attachedImageCount: number
   assistant: {
     replyZh: string
   }
@@ -71,7 +75,7 @@ export type ModelBundleAssistantResult = {
 export type PreparedModelBundleAssistantTurn = {
   ollamaModel: string
   imageAttached: boolean
-  imageB64: string | undefined
+  imageB64s: string[]
   prompt: string
   recommendLimitPerSlot: number
   perSearchLimit: number
@@ -80,36 +84,12 @@ export type PreparedModelBundleAssistantTurn = {
 
 const MAX_MESSAGES = 24
 const MAX_CONTENT_LEN = 8000
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 const MAX_BUNDLES = 3
 const MIN_BUNDLES = 1
 const MAX_TAGS_PER_SLOT = 4
 const MAX_QUERIES_PER_SLOT = 2
 const MAX_LORAS_PER_BUNDLE = 2
-
-function parseOptionalImageBase64(raw: unknown): string | undefined {
-  if (raw == null) return undefined
-  if (typeof raw !== 'string') return undefined
-  let s = raw.trim()
-  if (!s) return undefined
-  const dataUrl = /^data:image\/[^;]+;base64,(.+)$/i.exec(s)
-  if (dataUrl) s = dataUrl[1].replace(/\s/g, '')
-  else s = s.replace(/\s/g, '')
-  try {
-    const buf = Buffer.from(s, 'base64')
-    if (buf.byteLength === 0) {
-      throw new AppHttpError(400, 'imageBase64 decodes to empty')
-    }
-    if (buf.byteLength > MAX_IMAGE_BYTES) {
-      throw new AppHttpError(400, 'imageBase64 too large (max 8 MB after decode)')
-    }
-  } catch (e) {
-    if (e instanceof AppHttpError) throw e
-    throw new AppHttpError(400, 'imageBase64 is not valid base64')
-  }
-  return s
-}
 
 function readNonEmptyString(x: unknown, field: string): string {
   if (typeof x !== 'string' || !x.trim()) {
@@ -158,20 +138,28 @@ function normalizeMessages(raw: unknown, allowLastUserEmptyWithImage: boolean): 
   }
   const last = out[out.length - 1]
   if (!last.content.trim() && !allowLastUserEmptyWithImage) {
-    throw new AppHttpError(400, 'Last user message must not be empty unless imageBase64 is provided')
+    throw new AppHttpError(
+      400,
+      'Last user message must not be empty unless at least one reference image is provided (imageBase64 / imageBase64s)',
+    )
   }
   return out
 }
 
-function formatTranscript(messages: ModelBundleAssistantMessage[], imageAttached: boolean): string {
+function formatTranscript(messages: ModelBundleAssistantMessage[], attachedImageCount: number): string {
   return messages
     .map((m, idx) => {
       const label = m.role === 'user' ? 'User' : 'Assistant'
       const isLast = idx === messages.length - 1
+      const n = attachedImageCount
+      const placeholder =
+        n <= 0
+          ? ''
+          : n === 1
+            ? '[A reference image is attached for this user turn (no text).]'
+            : `[${String(n)} reference images are attached for this user turn (no text).]`
       const text =
-        m.role === 'user' && isLast && imageAttached && !m.content.trim()
-          ? '[A reference image is attached for this user turn (no text).]'
-          : m.content
+        m.role === 'user' && isLast && n > 0 && !m.content.trim() ? placeholder : m.content
       return `${label}:\n${text}`
     })
     .join('\n\n---\n\n')
@@ -246,8 +234,8 @@ export async function prepareModelBundleAssistantTurn(
   env: ServerEnv,
   body: ModelBundleAssistantBody,
 ): Promise<PreparedModelBundleAssistantTurn> {
-  const imageB64 = parseOptionalImageBase64((body as Record<string, unknown>).imageBase64)
-  const imageAttached = Boolean(imageB64)
+  const { imagesBase64: imageB64s } = parseOllamaVisionImagesFromBody(body as Record<string, unknown>)
+  const imageAttached = imageB64s.length > 0
   const messages = normalizeMessages(body.messages, imageAttached)
 
   const ollamaModel = body.ollamaModel?.trim() || env.ollamaSummaryModel
@@ -262,25 +250,29 @@ export async function prepareModelBundleAssistantTurn(
   const perSearchLimit = Math.min(100, Math.max(1, Math.floor(body.perSearchLimit ?? 12)))
   const nsfw = body.nsfw === false ? false : true
 
-  const visionNote = imageAttached
-    ? [
-        'A REFERENCE IMAGE is attached for the latest user turn (via the vision API).',
-        'Infer style, subject, and medium cues to propose Civitai discovery tags/queries in English.',
-        '',
-      ].join('\n')
-    : ''
+  const nImg = imageB64s.length
+  const visionNote =
+    nImg > 0
+      ? [
+          nImg === 1
+            ? 'A REFERENCE IMAGE is attached for the latest user turn (via the vision API).'
+            : `${String(nImg)} REFERENCE IMAGES are attached for the latest user turn (via the vision API).`,
+          'Infer style, subject, and medium cues to propose Civitai discovery tags/queries in English.',
+          '',
+        ].join('\n')
+      : ''
 
   const prompt = [
     'You help users build SMALL "download shopping lists" for Stable Diffusion on Civitai: one base Checkpoint plus optional LoRAs per bundle.',
     'The user may write in Traditional Chinese, English, or mixed language.',
     visionNote,
     'Conversation so far (newest at the end):',
-    formatTranscript(messages, imageAttached),
+    formatTranscript(messages, nImg),
     '',
-    'Task: respond to the LATEST user message (and attached image if any). Output ONE JSON object only, no markdown, no commentary.',
+    'Task: respond to the LATEST user message (and attached images if any). Output ONE JSON object only, no markdown, no commentary.',
     'JSON must be strict RFC 8259: no trailing commas, no markdown code fences, no text before the opening {.',
     'Keys exactly:',
-    '- "replyZh": Traditional Chinese, SHORT (max ~120 characters worth of prose): friendly next step, no long tutorials. Do NOT explain ControlNet install or long toolchains.',
+    '- "replyZh": optional short user-visible line (any language; zh-TW OK). Max ~120 characters; friendly next step, no long tutorials. If empty, the server uses the first bundle title.',
     '- "bundles": array length 1-3. Each bundle is ONE alternative stack the user could download.',
     '  Each bundle object keys:',
     '  - "titleZh": short Traditional Chinese label for this stack (e.g. route A/B).',
@@ -299,7 +291,7 @@ export async function prepareModelBundleAssistantTurn(
   return {
     ollamaModel,
     imageAttached,
-    imageB64,
+    imageB64s,
     prompt,
     recommendLimitPerSlot,
     perSearchLimit,
@@ -349,8 +341,9 @@ export async function completeModelBundleAssistantFromLlmRaw(
   }
 
   const o = parsed as Record<string, unknown>
-  const replyZh = readNonEmptyString(o.replyZh, 'replyZh')
   const specs = parseBundlesFromLlm(o)
+  const replyZh =
+    readOptionalAssistantReplyLine(o.replyZh) || specs[0]?.titleZh || 'See download bundles below.'
 
   const bundles: ModelBundleResolved[] = []
   for (const spec of specs) {
@@ -377,6 +370,7 @@ export async function completeModelBundleAssistantFromLlmRaw(
   return {
     ollamaModel: prep.ollamaModel,
     imageAttached: prep.imageAttached,
+    attachedImageCount: prep.imageB64s.length,
     assistant: { replyZh },
     bundles,
     resourceExtras,
@@ -396,7 +390,7 @@ export async function writeModelBundleAssistantChatStream(
     model: prep.ollamaModel,
     prompt: prep.prompt,
     format: 'json',
-    images: prep.imageB64 ? [prep.imageB64] : undefined,
+    images: prep.imageB64s.length > 0 ? prep.imageB64s : undefined,
     signal: opts?.signal,
     onToken: async (chunk) => {
       await writeLine({ type: 'delta', text: chunk })
@@ -423,7 +417,7 @@ export async function runModelBundleAssistantChat(
     model: prep.ollamaModel,
     prompt: prep.prompt,
     format: 'json',
-    images: prep.imageB64 ? [prep.imageB64] : undefined,
+    images: prep.imageB64s.length > 0 ? prep.imageB64s : undefined,
   })
 
   return completeModelBundleAssistantFromLlmRaw(raw, env, prep)

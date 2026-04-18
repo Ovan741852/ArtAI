@@ -25,6 +25,8 @@ export type CheckpointTagAssistantLocalRow = {
 export type CheckpointTagAssistantOkData = {
   ollamaModel: string
   imageAttached: boolean
+  /** 本輪送入 Ollama 的參考圖張數；舊伺服器可能未回傳，前端可 fallback。 */
+  attachedImageCount: number
   localCheckpoints: CheckpointTagAssistantLocalRow[]
   assistant: {
     replyZh: string
@@ -81,14 +83,22 @@ export class CheckpointTagAssistantChatReq extends HttpRequest {
 
   onAllocate(
     messages: CheckpointTagAssistantMessage[],
-    opts?: { ollamaModel?: string; recommendLimit?: number; imageBase64?: string | null },
+    opts?: {
+      ollamaModel?: string
+      recommendLimit?: number
+      imageBase64?: string | null
+      imageBase64s?: string[] | null
+    },
   ): void {
     const img = opts?.imageBase64?.trim()
+    const imgs =
+      opts?.imageBase64s?.map((s) => s.trim()).filter((s) => s.length > 0) ?? []
     this.payload = {
       messages,
       ...(opts?.ollamaModel ? { ollamaModel: opts.ollamaModel } : {}),
       ...(opts?.recommendLimit != null ? { recommendLimit: opts.recommendLimit } : {}),
       ...(img ? { imageBase64: img } : {}),
+      ...(imgs.length > 0 ? { imageBase64s: imgs } : {}),
     }
   }
 
@@ -134,6 +144,13 @@ export class CheckpointTagAssistantChatRsp extends HttpPacket {
     }
     const ollamaModel = typeof o.ollamaModel === 'string' ? o.ollamaModel : ''
     const imageAttached = o.imageAttached === true
+    const attachedRaw = o.attachedImageCount
+    const attachedImageCount =
+      typeof attachedRaw === 'number' && Number.isFinite(attachedRaw)
+        ? Math.max(0, Math.floor(attachedRaw))
+        : imageAttached
+          ? 1
+          : 0
     const assistantRaw = o.assistant
     if (!assistantRaw || typeof assistantRaw !== 'object') {
       this.ok = false
@@ -151,6 +168,7 @@ export class CheckpointTagAssistantChatRsp extends HttpPacket {
     this.data = {
       ollamaModel,
       imageAttached,
+      attachedImageCount,
       localCheckpoints: parseLocalRows(o.localCheckpoints),
       assistant: { replyZh, modelTags, searchQueries },
       recommendedModels: parseRecommended(o.recommendedModels),

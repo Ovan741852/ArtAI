@@ -17,12 +17,42 @@ import './modelBundleAssistant.css'
 const client = createDefaultHttpClient()
 
 const MAX_IMAGE_FILE_BYTES = 6 * 1024 * 1024
+const MAX_PENDING_IMAGES = 6
 const MEMORY_RESET_TIP_MS = 4500
 const STREAM_OPEN_CAP = 420
 
 type PendingImage = {
+  id: string
   dataUrl: string
   base64: string
+}
+
+function readImageFileAsPending(file: File): Promise<
+  { ok: true; img: PendingImage } | { ok: false; err: 'type' | 'size' | 'read' | 'empty' }
+> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) {
+      resolve({ ok: false, err: 'type' })
+      return
+    }
+    if (file.size > MAX_IMAGE_FILE_BYTES) {
+      resolve({ ok: false, err: 'size' })
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+      const comma = dataUrl.indexOf(',')
+      const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : ''
+      if (!b64) {
+        resolve({ ok: false, err: 'empty' })
+        return
+      }
+      resolve({ ok: true, img: { id: newHistoryId(), dataUrl, base64: b64 } })
+    }
+    reader.onerror = () => resolve({ ok: false, err: 'read' })
+    reader.readAsDataURL(file)
+  })
 }
 
 type BundleHistoryEntry = {
@@ -59,7 +89,7 @@ type ChatTurn =
       role: 'user'
       content: string
       wasImageOnly?: boolean
-      userImageDataUrl?: string
+      userImageDataUrls?: string[]
     }
   | {
       role: 'assistant'
@@ -144,7 +174,7 @@ export function ModelBundleAssistantWindow() {
 
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [draft, setDraft] = useState('')
-  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null)
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [imageErr, setImageErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
@@ -225,34 +255,58 @@ export function ModelBundleAssistantWindow() {
     return hit ?? bundleHistory[0]
   }, [bundleHistory, selectedHistoryId])
 
-  const ingestImageFile = useCallback((file: File | null) => {
-    setImageErr(null)
-    if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setImageErr('請選擇圖片檔（image/*）。')
-      return
-    }
-    if (file.size > MAX_IMAGE_FILE_BYTES) {
-      setImageErr(`圖片請小於 ${String(Math.floor(MAX_IMAGE_FILE_BYTES / 1024 / 1024))} MB。`)
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
-      const comma = dataUrl.indexOf(',')
-      const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : ''
-      if (!b64) {
-        setImageErr('無法讀取圖片內容。')
-        return
+  const ingestImageFiles = useCallback((files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return
+    const arr = Array.from(files)
+    void (async () => {
+      let typeRejects = 0
+      let sizeRejects = 0
+      const toRead: File[] = []
+      for (const file of arr) {
+        if (!file.type.startsWith('image/')) {
+          typeRejects++
+          continue
+        }
+        if (file.size > MAX_IMAGE_FILE_BYTES) {
+          sizeRejects++
+          continue
+        }
+        toRead.push(file)
       }
-      setPendingImage({ dataUrl, base64: b64 })
-    }
-    reader.onerror = () => setImageErr('讀取圖片失敗。')
-    reader.readAsDataURL(file)
+      const loaded: PendingImage[] = []
+      for (const file of toRead) {
+        const r = await readImageFileAsPending(file)
+        if (r.ok) loaded.push(r.img)
+      }
+      const errBag: { msg: string | null } = { msg: null }
+      setPendingImages((prev) => {
+        const room = MAX_PENDING_IMAGES - prev.length
+        if (room <= 0) {
+          if (loaded.length > 0) errBag.msg = `最多 ${String(MAX_PENDING_IMAGES)} 張參考圖。`
+          return prev
+        }
+        const take = loaded.slice(0, room)
+        if (loaded.length > room) {
+          errBag.msg = `最多 ${String(MAX_PENDING_IMAGES)} 張；已加入前 ${String(room)} 張。`
+        } else if (take.length === 0 && arr.length > 0) {
+          if (typeRejects === arr.length) errBag.msg = '請選擇圖片檔（image/*）。'
+          else if (sizeRejects > 0) {
+            errBag.msg = `圖片請小於 ${String(Math.floor(MAX_IMAGE_FILE_BYTES / 1024 / 1024))} MB。`
+          } else errBag.msg = '讀取圖片失敗。'
+        }
+        return take.length > 0 ? [...prev, ...take] : prev
+      })
+      setImageErr(errBag.msg)
+    })()
   }, [])
 
-  const clearPendingImage = useCallback(() => {
-    setPendingImage(null)
+  const removePendingImage = useCallback((id: string) => {
+    setPendingImages((prev) => prev.filter((p) => p.id !== id))
+    setImageErr(null)
+  }, [])
+
+  const clearPendingImages = useCallback(() => {
+    setPendingImages([])
     setImageErr(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
@@ -260,7 +314,7 @@ export function ModelBundleAssistantWindow() {
   const resetWorkspace = useCallback(() => {
     setTurns([])
     setDraft('')
-    setPendingImage(null)
+    setPendingImages([])
     setImageErr(null)
     setChatError(null)
     setBundleHistory([])
@@ -286,13 +340,15 @@ export function ModelBundleAssistantWindow() {
 
   const send = useCallback(async () => {
     const text = draft.trim()
-    const imgSnap = pendingImage
-    const imgB64 = imgSnap?.base64 ?? null
-    if ((!text && !imgB64) || sending) return
+    const imgSnaps = [...pendingImages]
+    const hasImg = imgSnaps.length > 0
+    if ((!text && !hasImg) || sending) return
     setChatError(null)
 
-    const userDisplay = text || '（已附參考圖）'
-    const wasImageOnly = Boolean(imgB64 && !text)
+    const userDisplay =
+      text ||
+      (imgSnaps.length > 1 ? `（已附 ${String(imgSnaps.length)} 張參考圖）` : '（已附參考圖）')
+    const wasImageOnly = Boolean(hasImg && !text)
 
     const nextMessages: ModelBundleAssistantMessage[] = [
       ...messagesForApi,
@@ -300,11 +356,14 @@ export function ModelBundleAssistantWindow() {
     ]
 
     setDraft('')
-    setPendingImage(null)
+    setPendingImages([])
     if (fileInputRef.current) fileInputRef.current.value = ''
 
-    if (imgSnap?.dataUrl) {
-      setSentImageHistory((prev) => [...prev, { id: newHistoryId(), dataUrl: imgSnap.dataUrl }])
+    if (imgSnaps.length > 0) {
+      setSentImageHistory((prev) => [
+        ...prev,
+        ...imgSnaps.map((s) => ({ id: newHistoryId(), dataUrl: s.dataUrl })),
+      ])
     }
 
     setTurns((prev) => [
@@ -313,7 +372,7 @@ export function ModelBundleAssistantWindow() {
         role: 'user',
         content: userDisplay,
         wasImageOnly,
-        userImageDataUrl: imgSnap?.dataUrl,
+        userImageDataUrls: imgSnaps.map((s) => s.dataUrl),
       },
       { role: 'assistant', content: '', streaming: true, streamRaw: '' },
     ])
@@ -324,7 +383,9 @@ export function ModelBundleAssistantWindow() {
       ollamaModel: ollamaPicked,
       recommendLimitPerSlot: 4,
     }
-    if (imgB64) streamBody.imageBase64 = imgB64
+    if (imgSnaps.length > 0) {
+      streamBody.imageBase64s = imgSnaps.map((s) => s.base64)
+    }
 
     try {
       const out = await postModelBundleAssistantChatStream(streamBody, {
@@ -373,31 +434,30 @@ export function ModelBundleAssistantWindow() {
       if (out.ok === false) {
         setChatError(out.message)
         setTurns((prev) => prev.slice(0, -2))
-        if (imgB64 && imgSnap?.dataUrl) {
-          setSentImageHistory((prev) => {
-            const last = prev[prev.length - 1]
-            if (last && last.dataUrl === imgSnap.dataUrl) return prev.slice(0, -1)
-            return prev
-          })
+        if (imgSnaps.length > 0) {
+          const n = imgSnaps.length
+          setSentImageHistory((prev) => (prev.length >= n ? prev.slice(0, -n) : prev))
+          setPendingImages(imgSnaps)
         }
-        if (imgB64 && imgSnap) setPendingImage(imgSnap)
       }
     } finally {
       setSending(false)
     }
-  }, [draft, messagesForApi, ollamaPicked, pendingImage, sending])
+  }, [draft, messagesForApi, ollamaPicked, pendingImages, sending])
 
   const onDrop = useCallback(
     (ev: DragEvent) => {
       ev.preventDefault()
       ev.stopPropagation()
-      const f = ev.dataTransfer.files?.[0]
-      ingestImageFile(f ?? null)
+      const list = ev.dataTransfer.files
+      if (list && list.length > 0) ingestImageFiles(list)
     },
-    [ingestImageFile],
+    [ingestImageFiles],
   )
 
-  const canSend = Boolean(ollamaPicked && ollamaModelNames.length > 0 && (draft.trim() || pendingImage) && !sending)
+  const canSend = Boolean(
+    ollamaPicked && ollamaModelNames.length > 0 && (draft.trim() || pendingImages.length > 0) && !sending,
+  )
 
   return (
     <section className="mba" aria-labelledby="mba-title">
@@ -445,8 +505,17 @@ export function ModelBundleAssistantWindow() {
                   {t.role === 'user' ? (
                     <>
                       {t.content ? <div className="mba__bubble-text">{t.content}</div> : null}
-                      {t.userImageDataUrl ? (
-                        <img className="mba__user-img" src={t.userImageDataUrl} alt="此則訊息附上的參考圖" />
+                      {t.userImageDataUrls && t.userImageDataUrls.length > 0 ? (
+                        <div className="mba__user-imgs" role="group" aria-label="此則訊息附上的參考圖">
+                          {t.userImageDataUrls.map((url, idx) => (
+                            <img
+                              key={`${String(idx)}-${url.slice(0, 48)}`}
+                              className="mba__user-img"
+                              src={url}
+                              alt=""
+                            />
+                          ))}
+                        </div>
                       ) : null}
                     </>
                   ) : t.streaming ? (
@@ -559,23 +628,44 @@ export function ModelBundleAssistantWindow() {
                 }}
                 onClick={() => fileInputRef.current?.click()}
               >
-                {pendingImage ? (
-                  <img className="mba__drop-preview" src={pendingImage.dataUrl} alt="待送出參考圖預覽" />
+                {pendingImages.length > 0 ? (
+                  <ul className="mba__pending-list" aria-label="待送出參考圖預覽">
+                    {pendingImages.map((p) => (
+                      <li key={p.id} className="mba__pending-item">
+                        <img className="mba__drop-preview" src={p.dataUrl} alt="" />
+                        <button
+                          type="button"
+                          className="mba__pending-remove"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removePendingImage(p.id)
+                          }}
+                          aria-label="移除此張待送圖"
+                        >
+                          移除
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 ) : (
-                  <span className="mba__drop-placeholder">點此或拖放圖片</span>
+                  <span className="mba__drop-placeholder">點此或拖放圖片（可多張，最多 {MAX_PENDING_IMAGES}）</span>
                 )}
               </div>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 className="mba__file-input"
                 aria-label="選擇參考圖"
-                onChange={(e) => ingestImageFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  ingestImageFiles(e.target.files)
+                  e.target.value = ''
+                }}
               />
-              {pendingImage ? (
-                <button type="button" className="mba__ghost" onClick={clearPendingImage}>
-                  移除待送圖
+              {pendingImages.length > 0 ? (
+                <button type="button" className="mba__ghost" onClick={clearPendingImages}>
+                  清空待送圖
                 </button>
               ) : null}
             </div>

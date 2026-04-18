@@ -1,4 +1,5 @@
 import type { ServerEnv } from '../config/env.js'
+import { readOptionalAssistantReplyLine } from '../lib/assistantLlmUserReply.js'
 import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { applyWorkflowTemplatePatch } from './applyWorkflowTemplatePatch.js'
@@ -62,12 +63,8 @@ export type PreparedWorkflowAssistantTurn = {
 const MAX_MESSAGES = 24
 const MAX_CONTENT_LEN = 8000
 
-function readNonEmptyString(x: unknown, field: string): string {
-  if (typeof x !== 'string' || !x.trim()) {
-    throw new AppHttpError(502, `LLM JSON: "${field}" must be a non-empty string`)
-  }
-  return x.trim()
-}
+const WORKFLOW_ASSISTANT_REPLY_FALLBACK =
+  'Pick a template or describe what you want to change.'
 
 function normalizeMessages(raw: unknown): WorkflowAssistantMessage[] {
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -241,7 +238,7 @@ export async function prepareWorkflowAssistantTurn(
     '',
     'Task: respond to the LATEST user message. Output ONE JSON object only, no markdown, no commentary.',
     'Keys exactly:',
-    '- "replyZh": Traditional Chinese reply (concise, friendly, actionable).',
+    '- "replyZh": optional short user-visible line (any language; zh-TW OK). Concise, friendly, actionable. If empty, the server may use understandingZh or a generic fallback.',
     '- "understandingZh": optional string — short restatement of what you think the user wants.',
     '- "confirmationOptionsZh": 0-4 short Traditional Chinese lines the user can confirm (e.g. "你是想要更清晰？").',
     '- "intentEn": object with short English string values (0-12 keys) describing structured intent (e.g. sharper, faster, face_focus).',
@@ -282,11 +279,14 @@ export async function completeWorkflowAssistantFromLlmRaw(
   }
 
   const o = parsed as Record<string, unknown>
-  const replyZh = readNonEmptyString(o.replyZh, 'replyZh')
   const understandingZh =
     typeof o.understandingZh === 'string' && o.understandingZh.trim()
       ? o.understandingZh.trim().slice(0, 1200)
       : undefined
+  const replyZh =
+    readOptionalAssistantReplyLine(o.replyZh) ||
+    (understandingZh ? understandingZh.slice(0, 220) : '') ||
+    WORKFLOW_ASSISTANT_REPLY_FALLBACK
   const confirmationOptionsZh = coerceLlmStringList(o.confirmationOptionsZh, 4)
   const intentEn = parseIntentEn(o.intentEn)
 

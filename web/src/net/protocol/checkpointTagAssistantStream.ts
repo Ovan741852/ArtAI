@@ -14,6 +14,13 @@ function parseFinalPayload(o: Record<string, unknown>): CheckpointTagAssistantOk
   if (o.ok !== true) return null
   const ollamaModel = typeof o.ollamaModel === 'string' ? o.ollamaModel : ''
   const imageAttached = o.imageAttached === true
+  const attachedRaw = o.attachedImageCount
+  const attachedImageCount =
+    typeof attachedRaw === 'number' && Number.isFinite(attachedRaw)
+      ? Math.max(0, Math.floor(attachedRaw))
+      : imageAttached
+        ? 1
+        : 0
   const assistantRaw = o.assistant
   if (!assistantRaw || typeof assistantRaw !== 'object') return null
   const a = assistantRaw as Record<string, unknown>
@@ -30,6 +37,7 @@ function parseFinalPayload(o: Record<string, unknown>): CheckpointTagAssistantOk
   return {
     ollamaModel,
     imageAttached,
+    attachedImageCount,
     localCheckpoints: localCheckpoints as CheckpointTagAssistantOkData['localCheckpoints'],
     assistant: { replyZh, modelTags, searchQueries },
     recommendedModels: recommendedModels as CheckpointTagAssistantOkData['recommendedModels'],

@@ -143,6 +143,53 @@
   object-fit: contain;
 }
 
+.mba__user-imgs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mba__user-imgs .mba__user-img {
+  margin-top: 0;
+  max-height: 140px;
+  max-width: min(48%, 200px);
+}
+
+.mba__pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+}
+
+.mba__pending-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 120px;
+}
+
+.mba__pending-remove {
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.mba__pending-remove:hover {
+  border-color: var(--accent-border);
+}
+
 .mba__pick-turn {
   margin-bottom: 8px;
 }

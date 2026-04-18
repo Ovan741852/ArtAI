@@ -4,6 +4,9 @@ import { CheckpointTagAssistantWindow } from './checkpointTagAssistant/Checkpoin
 import { ModelBundleAssistantWindow } from './modelBundleAssistant/ModelBundleAssistantWindow'
 import { LocalModelsDumpWindow } from './localModelsDump/LocalModelsDumpWindow'
 import { MattingPanelWindow } from './mattingPanel/MattingPanelWindow'
+import { CreativeLoopPanelWindow } from './creativeLoopPanel/CreativeLoopPanelWindow'
+import { CharacterLibraryWindow } from './characterLibrary/CharacterLibraryWindow'
+import { CharacterRosterPanelWindow } from './characterLibrary/CharacterRosterPanelWindow'
 import { DemoEchoReq, DemoEchoRsp, createDefaultHttpClient } from './net'
 import { useHelloStore } from './store/useHelloStore'
 
@@ -54,6 +57,15 @@ function App() {
       </section>
       <section className="mat-panel" aria-label="摳圖">
         <MattingPanelWindow />
+      </section>
+      <section className="cloop-panel" aria-label="創意閉環">
+        <CreativeLoopPanelWindow />
+      </section>
+      <section className="croster-panel" aria-label="角色總覽">
+        <CharacterRosterPanelWindow />
+      </section>
+      <section className="clib-panel" aria-label="角色庫">
+        <CharacterLibraryWindow />
       </section>
       <div className="hello hello--tools">
         <LocalModelsDumpWindow />

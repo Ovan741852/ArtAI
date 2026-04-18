@@ -15,7 +15,7 @@ export function createCivitaiCheckpointTagAssistantRoutes(env: ServerEnv) {
 
   /**
    * 多輪對話：依本機 checkpoint 清單（與目錄 tags）＋使用者訊息，由 Ollama 產出繁中回覆與英文 tag／query，再向 Civitai 合併搜尋推薦 Checkpoint。
-   * 可選 `imageBase64` 附參考圖（Ollama `/api/generate` 之 `images`）；須選視覺模型。
+   * 可選 `imageBase64`／`imageBase64s` 附參考圖（Ollama `/api/generate` 之 `images`）；須選視覺模型。
    */
   r.post('/civitai/checkpoint/tag-assistant/chat', async (c) => {
     let body: unknown

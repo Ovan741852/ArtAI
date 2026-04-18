@@ -1,0 +1,170 @@
+/* 角色庫面板 BEM：clib__ */
+
+.clib {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 22px clamp(16px, 2.5vw, 28px) 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.clib__head {
+  margin: 0 0 16px;
+}
+
+.clib__title {
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+  color: var(--text-h);
+}
+
+.clib__lead {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.clib__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.clib__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 18px;
+}
+
+@media (max-width: 860px) {
+  .clib__split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.clib__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.clib__list-item {
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.clib__list-item:last-child {
+  border-bottom: none;
+}
+
+.clib__list-btn {
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.clib__list-btn:hover {
+  background: color-mix(in srgb, var(--text-h) 6%, transparent);
+}
+
+.clib__list-btn--active {
+  background: color-mix(in srgb, var(--text-h) 10%, transparent);
+}
+
+.clib__meta {
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+  margin-top: 4px;
+}
+
+.clib__thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.clib__thumb {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+.clib__thumb-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+}
+
+.clib__err {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #c0392b 12%, transparent);
+  color: var(--text-h);
+  font-size: 0.9rem;
+}
+
+.clib__input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  min-width: 160px;
+}
+
+.clib__btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-h) 8%, var(--bg));
+  color: var(--text-h);
+  font: inherit;
+  cursor: pointer;
+}
+
+.clib__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.clib__btn--primary {
+  background: var(--text-h);
+  color: var(--bg);
+  border-color: var(--text-h);
+}
+
+.clib__profile {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -1,3 +1,5 @@
+import path from 'node:path'
+
 export type ServerEnv = {
   /** HTTP listen port */
   port: number
@@ -36,6 +38,16 @@ export type ServerEnv = {
    * 環境變數：`COMFY_OBJECT_INFO_TTL_MS`（預設與 dump 相同 30000）。
    */
   comfyObjectInfoTtlMs: number
+  /**
+   * 角色庫索引 JSON（預設 `data/character-library/index.json`）。
+   * 環境變數：`CHARACTER_LIBRARY_STORE`。
+   */
+  characterLibraryStorePath: string
+  /**
+   * 角色庫參考圖檔根目錄（預設 `data/character-library/files`）。
+   * 環境變數：`CHARACTER_LIBRARY_FILES_DIR`。
+   */
+  characterLibraryFilesDir: string
 }
 
 function parsePort(raw: string | undefined, fallback: number): number {
@@ -112,5 +124,19 @@ export function loadServerEnv(): ServerEnv {
       process.env.COMFY_OBJECT_INFO_TTL_MS,
       parseNonNegativeInt(process.env.LOCAL_MODELS_DUMP_TTL_MS, 30_000),
     ),
+    characterLibraryStorePath: resolveCharacterLibraryStorePath(),
+    characterLibraryFilesDir: resolveCharacterLibraryFilesDir(),
   }
+}
+
+function resolveCharacterLibraryStorePath(): string {
+  const raw = process.env.CHARACTER_LIBRARY_STORE?.trim()
+  if (raw && raw !== '') return path.resolve(raw)
+  return path.resolve(process.cwd(), 'data', 'character-library', 'index.json')
+}
+
+function resolveCharacterLibraryFilesDir(): string {
+  const raw = process.env.CHARACTER_LIBRARY_FILES_DIR?.trim()
+  if (raw && raw !== '') return path.resolve(raw)
+  return path.resolve(process.cwd(), 'data', 'character-library', 'files')
 }

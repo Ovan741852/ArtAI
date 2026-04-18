@@ -30,6 +30,7 @@
 |------|------|------|
 | `GET` | `/workflows/templates` | 列出模板摘要：`templates[]` 每筆含 `id`、`titleZh`、`descriptionZh`、`tags`、`requiredPacks`、`whitelistKeys`。 |
 | `GET` | `/workflows/templates/:id` | 單一模板。成功時 `human`（繁中與標籤）與 `machine`（`templateId`、`whitelistParams`、`workflow`；`workflow` 為 Comfy API **`prompt`** 形狀：`{ [nodeId]: { class_type, inputs } }`）。未知 `id` 時 **404**。 |
+| `POST` | `/workflows/templates/:id/run` | **執行模板**：讀取 `id` 對應 JSON，將 **`patch`** 依白名單套入預設 `workflow` 後送 **ComfyUI** `/prompt`，輪詢至第一張輸出圖。Body：`patch`（選填，物件，可為 `{}` 表示全用模板預設）、`timeoutMs`（選填，毫秒，預設 **600000**，範圍 **10000–1800000**）。成功時 `ok: true`、`imagePngBase64`（PNG 純 base64、**無** data URL 前綴）、`patchApply`（`{ ok: true, appliedKeys, ignoredKeys }`）。`patch` 含非白名單鍵時仍會被忽略；型別不符等套用失敗時 **400**。Comfy 失敗或逾時 **502**。需設定 `COMFYUI_BASE_URL`／`COMFYUI_HOST`。 |
 
 ---
 
@@ -47,7 +48,7 @@
 **成功 JSON（非串流 `POST /workflows/assistant/chat`）：** `ok: true` 外加：
 
 - `ollamaModel`、`selectedTemplateId`（無則 `null`）、`localCheckpoints`、`templates`（與列表端相同形狀之陣列）、`objectInfoSummary`（`{ ok: true, nodeTypeCount, refreshedAt, fromCache }` 或 `{ ok: false, message }`，或 Comfy 未呼叫時 `null`）。
-- `assistant`：`replyZh`、`understandingZh?`、`confirmationOptionsZh[]`、`intentEn`（英文短字串鍵值）、`proposedPatch`（物件）、`suggestedTemplateId`（`string \| null`）。
+- `assistant`：`replyZh`（使用者可見短句；Ollama 可省略或留空，伺服器會用 `understandingZh` 或預設英文一句補上）、`understandingZh?`、`confirmationOptionsZh[]`、`intentEn`（英文短字串鍵值）、`proposedPatch`（物件）、`suggestedTemplateId`（`string \| null`）。
 - `resolvedWorkflow`：已選模板且 patch 套用成功時為 **prompt 圖**；否則 `null`。
 - `patchApply`：已選模板時為 `{ ok: true, appliedKeys, ignoredKeys }` 或 `{ ok: false, message }`；未選模板時 `null`。
 
@@ -80,11 +81,26 @@
 | `POST` | `/civitai/checkpoint/summary` | 依**單一**本機 checkpoint 檔名搜尋 Civitai、擷取描述與版本資訊後，交給本機 **Ollama** 產生**英文**用法摘要。Body：`{ "checkpoint": "foo.safetensors", "ollamaModel"?: "…", "searchQuery"?: "…" }`。 |
 | `POST` | `/civitai/models/suggest-from-descriptions` | 依多則畫面描述交 **Ollama** 推斷 Civitai 用 `tag`／`query` 搜尋用的字串，再以官方 `GET /api/v1/models` 依 **Most Downloaded + AllTime** 合併去重，回傳最熱門的模型列表（預設 5 筆）。Body：`{ "descriptions": "…" \| string[], "ollamaModel"?: "…", "types"?: "Checkpoint", "nsfw"?: boolean, "perSearchLimit"?: number, "limit"?: number }`。 |
 | `POST` | `/civitai/checkpoint/tag-assistant/chat` | **Checkpoint 需求助手（多輪，一次回 JSON）**：與 `chat-stream` 相同邏輯但以單一 JSON 回應（無串流）。Body 與 `chat-stream` 相同。 |
-| `POST` | `/civitai/checkpoint/tag-assistant/chat-stream` | **Checkpoint 需求助手（NDJSON 串流）**：Body 與 `…/chat` 相同。回應 **`Content-Type: application/x-ndjson`**，每行一個 JSON：① `{ "type": "delta", "text": "…" }`（Ollama 產生片段）；② `{ "type": "final", "ok": true, … }` 欄位與非串流成功 JSON 一致（`ollamaModel`、`imageAttached`、`localCheckpoints`、`assistant`、`recommendedModels`、**`resourceExtras`**）；③ `{ "type": "error", "ok": false, "message": "…" }`。先驗證 body 失敗時仍回 **一般 JSON**（400／502）而非串流。 |
+| `POST` | `/civitai/checkpoint/tag-assistant/chat-stream` | **Checkpoint 需求助手（NDJSON 串流）**：Body 與 `…/chat` 相同。回應 **`Content-Type: application/x-ndjson`**，每行一個 JSON：① `{ "type": "delta", "text": "…" }`（Ollama 產生片段）；② `{ "type": "final", "ok": true, … }` 欄位與非串流成功 JSON 一致（`ollamaModel`、`imageAttached`、**`attachedImageCount`**、`localCheckpoints`、`assistant`、`recommendedModels`、**`resourceExtras`**）；③ `{ "type": "error", "ok": false, "message": "…" }`。先驗證 body 失敗時仍回 **一般 JSON**（400／502）而非串流。 |
 | `POST` | `/civitai/model-bundles/assistant/chat` | **模型套組採購助手（多輪，一次回 JSON）**：見下方「模型套組採購助手」小節之 Body 與回應欄位；無串流。 |
 | `POST` | `/civitai/model-bundles/assistant/chat-stream` | **模型套組採購助手（NDJSON 串流）**：Body 與 `…/chat` 相同；`delta`／`final`／`error` 列格式同其他 NDJSON 端點。 |
 | `GET` | `/civitai/models/search` | 關鍵字搜尋 Civitai `GET /api/v1/models`。必填其一：`query` 或 `tag`。可選：`types`、`sort`、`period`、`baseModels`、`limit`、`nsfw`；`summarize=1` 時會用 Ollama 總結前幾筆。 |
 | `GET` | `/civitai/models/:id` | 依數字模型 ID 取得 Civitai `GET /api/v1/models/{id}`，回傳精簡後的 `model` 物件（description 去 HTML、含版本預覽等）。 |
+
+### Checkpoint 需求助手（Body、參考圖與成功欄位）
+
+**Body（`POST /civitai/checkpoint/tag-assistant/chat` 與 `…/chat-stream` 相同）：**
+
+- `messages`（必填）：`{ role: "user" \| "assistant", content: string }[]`，最後一則須為 `user`；當本請求帶有至少一張有效參考圖時，允許最後一則 `user` 的 `content` 為空字串（僅圖）。
+- `ollamaModel`（選填）：未傳則使用 `OLLAMA_SUMMARY_MODEL`。
+- `recommendLimit`（選填）：Civitai Checkpoint 推薦筆數上限，預設 **5**，範圍 **1–12**。
+- `perSearchLimit`（選填）：每次 tag／query 向 Civitai 取的筆數上限，預設 **12**，範圍 **1–100**。
+- `nsfw`（選填）：預設 `true`；傳 `false` 時關閉 NSFW。
+- `imageBase64`（選填）：單張參考圖 base64（可含 `data:image/...;base64,` 前綴）；解碼後單張上限 **8 MB**。送 Ollama `/api/generate` 之 `images`；須使用支援**視覺**的模型。
+- `imageBase64s`（選填）：`string[]`，多張參考圖；每個元素規則與 `imageBase64` 相同；陣列內空字串會略過。若同時傳 `imageBase64` 與 `imageBase64s`，伺服器合併順序為 **`[imageBase64, ...imageBase64s]`**（便於除錯）。合併後總張數超過 **6** 時 **400**。
+- 多張圖是否皆被視覺模型有效利用，**依 Ollama 模型與版本而定**；ArtAI 僅負責傳遞 `images` 陣列。
+
+**成功 JSON（非串流）：** `ok: true` 外加 `ollamaModel`、`imageAttached`（boolean）、**`attachedImageCount`**（0–6，實際送入 Ollama 的張數）、`localCheckpoints`、`assistant`（`replyZh`、`modelTags`、`searchQueries`；`replyZh` 若 Ollama 省略或空字串，伺服器依 `modelTags`／`searchQueries` 組一句英文後備）、`recommendedModels`、`resourceExtras`（見下節）。
 
 ### Checkpoint 需求助手（`resourceExtras`）
 
@@ -96,17 +112,17 @@
 
 **Body（`POST …/chat` 與 `…/chat-stream` 相同）：**
 
-- `messages`（必填）：`{ role: "user" \| "assistant", content: string }[]`，最後一則須為 `user`；可與 `imageBase64` 搭配時允許最後一則 `user` 的 `content` 為空字串（僅圖）。
+- `messages`（必填）：`{ role: "user" \| "assistant", content: string }[]`，最後一則須為 `user`；當本請求帶有至少一張有效參考圖時，允許最後一則 `user` 的 `content` 為空字串（僅圖）。
 - `ollamaModel`（選填）：未傳則使用 `OLLAMA_SUMMARY_MODEL`。
 - `recommendLimitPerSlot`（選填）：每個 slot（單一 checkpoint 或單一 LoRA）回傳的 Civitai 模型筆數上限，預設 **4**，範圍 **1–12**。
 - `perSearchLimit`（選填）：每次 tag／query 向 Civitai 取的筆數上限，預設 **12**，範圍 **1–100**。
 - `nsfw`（選填）：預設 `true`；傳 `false` 時關閉 NSFW。
-- `imageBase64`（選填）：同 checkpoint tag assistant；須使用支援視覺的 Ollama 模型。
+- `imageBase64`（選填）、`imageBase64s`（選填）：與 **Checkpoint 需求助手**小節「Body、參考圖」相同（合併順序、每張 8 MB、最多 6 張、須視覺模型）。
 
 **成功 JSON（非串流 `POST /civitai/model-bundles/assistant/chat`）：** `ok: true` 外加：
 
-- `ollamaModel`、`imageAttached`（boolean）。
-- `assistant`：`{ "replyZh": string }`（繁中短回覆）。
+- `ollamaModel`、`imageAttached`（boolean）、**`attachedImageCount`**（0–6）。
+- `assistant`：`{ "replyZh": string }`（Ollama 可省略；空時伺服器用第一組 bundle 的 `titleZh` 補上）。
 - `bundles`：陣列長度 **1–3**。每筆含：
   - `titleZh`、`noteZh`（選填，字串）
   - `checkpoint`：`modelTags`、`searchQueries`、`recommendedModels`（與 tag 助手推薦列相同精簡形狀之陣列）
@@ -171,6 +187,60 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 
 ---
 
+## 創意閉環（規劃層）
+
+獨立於 **Checkpoint 需求助手**／**模型套組採購助手** 的 **文字需求 →（可選）多張參考圖 → AI 規劃 Comfy 模板 patch** 流程；**生圖執行**請另呼叫 **`POST /workflows/templates/:id/run`**。內部重用 **Ollama**、**workflow 模板**、**`applyWorkflowTemplatePatch` 白名單邏輯**（與 Workflow 助手同源），不重複實作 patch 引擎。
+
+| 方法 | 路徑 | 用途 |
+|------|------|------|
+| `POST` | `/images/creative-loop/chat` | 單次 JSON：依 **`selectedTemplateId`** 讀模板白名單，附本機 checkpoint 清單與 **`GET /comfy/object_info` 快取摘要**，由 Ollama（**`format: json`**）產出繁中 **`replyZh`** 與 **`proposedPatch`**，並回傳 **`resolvedWorkflow`**／**`patchApply`**。 |
+
+**Body：**
+
+- `messages`（必填）：`{ role: "user" \| "assistant", content: string }[]`；最後一則須為 **`user`**；**每一則 `content` 皆須為非空字串**（**不可**僅靠附圖送空文字，避免目標飄移）。
+- `selectedTemplateId`（必填）：小寫 id（`[a-z0-9-]+`），須為已存在模板；無效時 **404**。
+- `ollamaModel`（選填）：未傳則使用 `OLLAMA_SUMMARY_MODEL`；須能處理 **`format: json`** 與（若有附圖）**視覺**輸入。
+- `imageBase64`（選填）、`imageBase64s`（選填）：與 **Checkpoint 需求助手**相同合併規則、每張解碼後 **8 MB**、合併後最多 **6** 張。
+- `lastOutputPngBase64`（選填）：上一張生成之 **PNG** base64（可含 `data:image/...;base64,` 前綴）；解碼規則與單張參考圖相同。伺服器將其 **附在參考圖陣列之後** 一併送 Ollama `images`，並在內部英文規劃 prompt 標示為 **LAST_OUTPUT** 供模型對照。**若參考圖已滿 6 張則不可再附**，否則 **400**。
+- 多張參考圖與上一張成品是否皆被視覺模型有效利用，**依 Ollama 模型與版本而定**。
+
+**成功 JSON：** `ok: true` 外加 `ollamaModel`、`selectedTemplateId`、`templateTitleZh`、`localCheckpoints`、`templates`（與 **`GET /workflows/templates`** 列表相同摘要形狀）、`objectInfoSummary`（與 **`POST /workflows/assistant/chat`** 相同）、**`attachedImageCount`**（實際送入 Ollama 的張數，含上一張成品）、`assistant`（`replyZh`、`understandingZh?`、`proposedPatch`）、`resolvedWorkflow`（patch 套用成功時為 prompt 圖，否則 `null`）、`patchApply`（成功 `{ ok: true, appliedKeys, ignoredKeys }` 或失敗 `{ ok: false, message }`）。
+
+---
+
+## 角色庫（本機索引 + 參考圖檔）
+
+用於建立「同一人物」的參考圖集合：**第一張成功入庫的圖為錨點**（`images[0]`），之後加圖會與錨點做身分延續審查。資料為伺服器工作目錄下 **索引 JSON**（預設 `data/character-library/index.json`）與 **圖檔目錄**（預設 `data/character-library/files/`）。本階段**不**包含依角色生圖。
+
+**Ollama：** gate 與 profile 皆呼叫本機 **`/api/generate`**（`format: json`）；請使用支援**視覺**的模型（與摳圖／Checkpoint 助手相同慣例）。`ollamaModel` 省略時使用 `OLLAMA_SUMMARY_MODEL`。
+
+**圖檔：** `imageBase64` 規則與摳圖 API 相同（可含 data URL 前綴、解碼後上限 **8 MB**、PNG／JPEG／WebP）。
+
+### Gate（僅審查、不寫庫）
+
+| 方法 | 路徑 | 用途 |
+|------|------|------|
+| `POST` | `/characters/gates/anchor` | 單張是否適合作為**錨點**（第一張）。成功時 **200**、`ok: true`、`accepted`、`messageZh`、`ollamaModel`、`machine`（`faceVisible`、`qualityOk`、`qualityScore`、`issuesEn`）。Body：`imageBase64`（必填）、`ollamaModel`（選填）。 |
+| `POST` | `/characters/gates/identity` | **錨點**與**候選**是否為同一人且差距可接受。成功時 **200**、`ok: true`、`accepted`、`messageZh`、`ollamaModel`、`machine`（`samePersonLikely`、`gapTooLarge`、`reasonsEn`）。Body：`anchorImageBase64`、`candidateImageBase64`（皆必填）、`ollamaModel`（選填）。 |
+
+### CRUD 與圖檔讀取
+
+| 方法 | 路徑 | 用途 |
+|------|------|------|
+| `GET` | `/characters` | 列表：`characters[]`（`id`、`displayName`、`imageCount`、`updatedAt`、`summaryZh`）、`count`、`storePath`、`filesDir`。 |
+| `POST` | `/characters` | 建立角色：`imageBase64`（錨點，必填）、`displayName`（選填字串）、`ollamaModel`（選填）。錨點 gate 未通過時 **422**，`ok: false`、`message`，並可含 `gate`、`machine`、`ollamaModel`。成功時 `character` 見下「詳情形狀」。 |
+| `GET` | `/characters/:id` | 詳情；未知 id **404**。 |
+| `POST` | `/characters/:id/images` | 加一張參考圖：`imageBase64`（必填）、`ollamaModel`（選填）。身分 gate 未通過時 **422**（欄位同上）。 |
+| `POST` | `/characters/:id/profile/refresh` | 依目前最多 **6** 張參考圖（由錨點起算）請 Ollama 產出 **`profileEn`（英文結構化物件）** 與 **`summaryZh`**（繁中摘要）並寫回索引。Body 可為空物件或 `{ "ollamaModel"?: string }`。無圖時 **400**。 |
+| `GET` | `/characters/:id/images/:imageId/file` | 回傳已存圖檔 bytes，`Content-Type` 為 `image/jpeg`／`image/png`／`image/webp`。 |
+
+**詳情 `character` 形狀（`GET /characters/:id` 與各 POST 成功時）：**
+
+- `human`：`id`、`displayName`、`summaryZh`、`imageCount`、`createdAt`、`updatedAt`。
+- `machine`：`characterId`、`profileEn`（物件或 `null`）、`profileMergedAt`（ISO 或 `null`）、`images[]`（`id`、`addedAt`、`mime`、`filePath`（相對於 API 根之路徑，前端需加 base，例如 Vite `VITE_API_BASE_URL`）、`isAnchor`）。
+
+---
+
 ## Demo
 
 | 方法 | 路徑 | 用途 |
@@ -193,5 +263,7 @@ Civitai 認證：可選環境變數 **`CIVITAI_API_KEY`**（或 `CIVITAI_API_TOK
 | `LOCAL_MODELS_DUMP_TTL_MS` | `GET /models/local/dump` 記憶體快取 TTL（毫秒）；預設 `30000`，設 `0` 表示每次請求皆重新抓取。 |
 | `COMFY_OBJECT_INFO_TTL_MS` | `GET /comfy/object_info` 記憶體快取 TTL（毫秒）；未設定時預設與 **`LOCAL_MODELS_DUMP_TTL_MS`** 相同（再未設定則 `30000`）；`0` 表示每次請求皆轉呼 ComfyUI。 |
 | `WORKFLOW_TEMPLATES_DIR` | Workflow 模板 JSON 目錄（選填）；預設為執行時 `cwd` 下 **`data/workflow-templates`**。 |
+| `CHARACTER_LIBRARY_STORE` | 角色庫索引 JSON 檔絕對或相對路徑（選填）；預設為執行時 `cwd` 下 **`data/character-library/index.json`**。 |
+| `CHARACTER_LIBRARY_FILES_DIR` | 角色庫參考圖檔根目錄（選填）；預設為執行時 `cwd` 下 **`data/character-library/files`**。 |
 
 CORS：生產環境可設定 `ALLOWED_ORIGINS`（逗號分隔）。

@@ -15,7 +15,7 @@ export function createCivitaiModelBundleAssistantRoutes(env: ServerEnv) {
 
   /**
    * 多輪對話：由 Ollama 產出繁中短回覆與最多 3 組「Checkpoint + 可選 LoRA」英文搜尋條件，再向 Civitai 合併搜尋。
-   * 可選 `imageBase64`（須視覺模型）。
+   * 可選 `imageBase64`／`imageBase64s`（須視覺模型）。
    */
   r.post('/civitai/model-bundles/assistant/chat', async (c) => {
     let body: unknown

@@ -5,8 +5,12 @@ export type MattingComfyCandidate = {
   tier: MattingComfyTier
 }
 
-/** 已知無法由 ArtAI 單線自動串接之節點（仍可能出現在 object_info）。 */
-const MATTING_CLASS_BLOCKLIST = new Set<string>(['ImageRemoveBackground+'])
+/**
+ * 已知無法由 ArtAI 單線自動串接之節點（仍可能出現在 object_info）。
+ * - `ImageRemoveBackground+`：需 `rembg_session` 等自訂型別連線。
+ * - `RecraftRemoveBackgroundNode`：名稱命中「remove background」關鍵字，多為雲端／授權流程，簡易 prompt 常執行失敗。
+ */
+const MATTING_CLASS_BLOCKLIST = new Set<string>(['ImageRemoveBackground+', 'RecraftRemoveBackgroundNode'])
 
 const FINE_RE =
   /birefnet|rmbg|isnet|modnet|human.?matte|portrait.?matte|silueta|u2net_human|inspyrenet|dis.?bg|disbg/i

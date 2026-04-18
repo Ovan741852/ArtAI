@@ -1,5 +1,8 @@
-import { Buffer } from 'node:buffer'
 import type { ServerEnv } from '../config/env.js'
+import {
+  fallbackReplyFromDiscoveryTags,
+  readOptionalAssistantReplyLine,
+} from '../lib/assistantLlmUserReply.js'
 import { coerceLlmStringList } from '../lib/coerceLlmStringList.js'
 import { parseJsonObjectFromLlm } from '../lib/parseLlmJsonObject.js'
 import { AppHttpError } from './civitaiCheckpointSummary.js'
@@ -12,6 +15,7 @@ import {
 import type { AssistantResourceExtraResolved } from './assistantResourceExtrasTypes.js'
 import { getLocalModelsDump } from './localModelsDump.js'
 import { ollamaGenerateNonStream, ollamaGenerateStreamCollect } from './ollamaGenerate.js'
+import { parseOllamaVisionImagesFromBody } from './ollamaVisionImagesFromBody.js'
 
 export type CheckpointTagAssistantRole = 'user' | 'assistant'
 
@@ -32,6 +36,10 @@ export type CheckpointTagAssistantBody = {
    * 解碼後上限 8MB。
    */
   imageBase64?: string
+  /**
+   * 多張參考圖；規則同 `imageBase64`。與 `imageBase64` 併用時順序為 `[單張, ...陣列]`；總張數上限見伺服器常數。
+   */
+  imageBase64s?: string[]
 }
 
 export type LocalCheckpointForAssistant = {
@@ -45,6 +53,8 @@ export type CheckpointTagAssistantResult = {
   ollamaModel: string
   /** 本請求是否附上圖片並走 Ollama `images` 欄位。 */
   imageAttached: boolean
+  /** 本請求實際送入 Ollama 的參考圖張數（0 表示無）。 */
+  attachedImageCount: number
   localCheckpoints: LocalCheckpointForAssistant[]
   assistant: {
     replyZh: string
@@ -59,7 +69,7 @@ export type CheckpointTagAssistantResult = {
 export type PreparedCheckpointTagAssistantTurn = {
   ollamaModel: string
   imageAttached: boolean
-  imageB64: string | undefined
+  imageB64s: string[]
   prompt: string
   localCheckpoints: LocalCheckpointForAssistant[]
   recommendLimit: number
@@ -69,37 +79,6 @@ export type PreparedCheckpointTagAssistantTurn = {
 
 const MAX_MESSAGES = 24
 const MAX_CONTENT_LEN = 8000
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-
-function parseOptionalImageBase64(raw: unknown): string | undefined {
-  if (raw == null) return undefined
-  if (typeof raw !== 'string') return undefined
-  let s = raw.trim()
-  if (!s) return undefined
-  const dataUrl = /^data:image\/[^;]+;base64,(.+)$/i.exec(s)
-  if (dataUrl) s = dataUrl[1].replace(/\s/g, '')
-  else s = s.replace(/\s/g, '')
-  try {
-    const buf = Buffer.from(s, 'base64')
-    if (buf.byteLength === 0) {
-      throw new AppHttpError(400, 'imageBase64 decodes to empty')
-    }
-    if (buf.byteLength > MAX_IMAGE_BYTES) {
-      throw new AppHttpError(400, 'imageBase64 too large (max 8 MB after decode)')
-    }
-  } catch (e) {
-    if (e instanceof AppHttpError) throw e
-    throw new AppHttpError(400, 'imageBase64 is not valid base64')
-  }
-  return s
-}
-
-function readNonEmptyString(x: unknown, field: string): string {
-  if (typeof x !== 'string' || !x.trim()) {
-    throw new AppHttpError(502, `LLM JSON: "${field}" must be a non-empty string`)
-  }
-  return x.trim()
-}
 
 function normalizeMessages(raw: unknown, allowLastUserEmptyWithImage: boolean): CheckpointTagAssistantMessage[] {
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -135,20 +114,28 @@ function normalizeMessages(raw: unknown, allowLastUserEmptyWithImage: boolean): 
   }
   const last = out[out.length - 1]
   if (!last.content.trim() && !allowLastUserEmptyWithImage) {
-    throw new AppHttpError(400, 'Last user message must not be empty unless imageBase64 is provided')
+    throw new AppHttpError(
+      400,
+      'Last user message must not be empty unless at least one reference image is provided (imageBase64 / imageBase64s)',
+    )
   }
   return out
 }
 
-function formatTranscript(messages: CheckpointTagAssistantMessage[], imageAttached: boolean): string {
+function formatTranscript(messages: CheckpointTagAssistantMessage[], attachedImageCount: number): string {
   return messages
     .map((m, idx) => {
       const label = m.role === 'user' ? 'User' : 'Assistant'
       const isLast = idx === messages.length - 1
+      const n = attachedImageCount
+      const placeholder =
+        n <= 0
+          ? ''
+          : n === 1
+            ? '[A reference image is attached for this user turn (no text).]'
+            : `[${String(n)} reference images are attached for this user turn (no text).]`
       const text =
-        m.role === 'user' && isLast && imageAttached && !m.content.trim()
-          ? '[A reference image is attached for this user turn (no text).]'
-          : m.content
+        m.role === 'user' && isLast && n > 0 && !m.content.trim() ? placeholder : m.content
       return `${label}:\n${text}`
     })
     .join('\n\n---\n\n')
@@ -161,8 +148,8 @@ export async function prepareCheckpointTagAssistantTurn(
   env: ServerEnv,
   body: CheckpointTagAssistantBody,
 ): Promise<PreparedCheckpointTagAssistantTurn> {
-  const imageB64 = parseOptionalImageBase64((body as Record<string, unknown>).imageBase64)
-  const imageAttached = Boolean(imageB64)
+  const { imagesBase64: imageB64s } = parseOllamaVisionImagesFromBody(body as Record<string, unknown>)
+  const imageAttached = imageB64s.length > 0
   const messages = normalizeMessages(body.messages, imageAttached)
 
   const ollamaModel = body.ollamaModel?.trim() || env.ollamaSummaryModel
@@ -193,14 +180,18 @@ export async function prepareCheckpointTagAssistantTurn(
 
   const localJson = JSON.stringify(localCheckpoints, null, 0)
 
-  const visionNote = imageAttached
-    ? [
-        'A REFERENCE IMAGE is attached for the latest user turn (via the vision API).',
-        'Infer visual style, subject, lighting, medium (photo vs illustration vs 3D), and genre cues relevant to Stable Diffusion checkpoint discovery.',
-        'Use the image together with any user text and the local checkpoint list.',
-        '',
-      ].join('\n')
-    : ''
+  const nImg = imageB64s.length
+  const visionNote =
+    nImg > 0
+      ? [
+          nImg === 1
+            ? 'A REFERENCE IMAGE is attached for the latest user turn (via the vision API).'
+            : `${String(nImg)} REFERENCE IMAGES are attached for the latest user turn (via the vision API).`,
+          'Infer visual style, subject, lighting, medium (photo vs illustration vs 3D), and genre cues relevant to Stable Diffusion checkpoint discovery.',
+          'Use the images together with any user text and the local checkpoint list.',
+          '',
+        ].join('\n')
+      : ''
 
   const prompt = [
     'You help users discover suitable Civitai checkpoint MODEL TAGS and short search queries for Stable Diffusion / ComfyUI.',
@@ -210,11 +201,11 @@ export async function prepareCheckpointTagAssistantTurn(
     localJson,
     '',
     'Conversation so far (newest at the end):',
-    formatTranscript(messages, imageAttached),
+    formatTranscript(messages, nImg),
     '',
-    'Task: respond to the LATEST user message (and attached image if any). Output ONE JSON object only, no markdown, no commentary.',
+    'Task: respond to the LATEST user message (and attached images if any). Output ONE JSON object only, no markdown, no commentary.',
     'Keys exactly:',
-    '- "replyZh": Traditional Chinese SHORT summary only (max ~220 characters): next step + tone; do NOT paste long tutorials here.',
+    '- "replyZh": optional short user-visible line (any language; Traditional Chinese OK). Max ~220 characters; next step + tone; do NOT paste long tutorials. If unsure, use "" and rely on modelTags/searchQueries.',
     '- "modelTags": 1-6 strings — plausible Civitai MODEL tags in English for CHECKPOINT discovery (e.g. anime, photorealistic, fantasy, architecture, portrait).',
     '- "searchQueries": 0-4 short English keyword phrases for Civitai Checkpoint name search when tags alone may miss.',
     '- "resourceExtras": array length 0-6. Each item explains ONE resource row the user should see (same content you would have put in a long reply).',
@@ -228,7 +219,7 @@ export async function prepareCheckpointTagAssistantTurn(
   return {
     ollamaModel,
     imageAttached,
-    imageB64,
+    imageB64s,
     prompt,
     localCheckpoints,
     recommendLimit,
@@ -259,9 +250,11 @@ export async function completeCheckpointTagAssistantFromLlmRaw(
   }
 
   const o = parsed as Record<string, unknown>
-  const replyZh = readNonEmptyString(o.replyZh, 'replyZh')
   const modelTags = coerceLlmStringList(o.modelTags, 6)
   const searchQueries = coerceLlmStringList(o.searchQueries, 4)
+  const replyZh =
+    readOptionalAssistantReplyLine(o.replyZh) ||
+    fallbackReplyFromDiscoveryTags(modelTags, searchQueries)
 
   let recommendedModels: CivitaiModelRow[] = []
   if (modelTags.length > 0 || searchQueries.length > 0) {
@@ -306,7 +299,7 @@ export async function writeCheckpointTagAssistantChatStream(
     ollamaBaseUrl: env.ollamaBaseUrl,
     model: prep.ollamaModel,
     prompt: prep.prompt,
-    images: prep.imageB64 ? [prep.imageB64] : undefined,
+    images: prep.imageB64s.length > 0 ? prep.imageB64s : undefined,
     signal: opts?.signal,
     onToken: async (chunk) => {
       await writeLine({ type: 'delta', text: chunk })
@@ -320,6 +313,7 @@ export async function writeCheckpointTagAssistantChatStream(
     ok: true,
     ollamaModel: prep.ollamaModel,
     imageAttached: prep.imageAttached,
+    attachedImageCount: prep.imageB64s.length,
     localCheckpoints: prep.localCheckpoints,
     assistant,
     recommendedModels,
@@ -337,7 +331,7 @@ export async function runCheckpointTagAssistantChat(
     ollamaBaseUrl: env.ollamaBaseUrl,
     model: prep.ollamaModel,
     prompt: prep.prompt,
-    images: prep.imageB64 ? [prep.imageB64] : undefined,
+    images: prep.imageB64s.length > 0 ? prep.imageB64s : undefined,
   })
 
   const { assistant, recommendedModels, resourceExtras } = await completeCheckpointTagAssistantFromLlmRaw(raw, env, prep)
@@ -345,6 +339,7 @@ export async function runCheckpointTagAssistantChat(
   return {
     ollamaModel: prep.ollamaModel,
     imageAttached: prep.imageAttached,
+    attachedImageCount: prep.imageB64s.length,
     localCheckpoints: prep.localCheckpoints,
     assistant,
     recommendedModels,

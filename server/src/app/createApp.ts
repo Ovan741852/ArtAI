@@ -16,6 +16,8 @@ import { createLocalModelsDumpRoutes } from '../routes/localModelsDump.js'
 import { createWorkflowAssistantRoutes } from '../routes/workflowAssistant.js'
 import { createWorkflowTemplateRoutes } from '../routes/workflowTemplates.js'
 import { createMattingAutoRoutes } from '../routes/mattingAuto.js'
+import { createCharacterLibraryRoutes } from '../routes/characterLibrary.js'
+import { createCreativeLoopRoutes } from '../routes/creativeLoop.js'
 
 export function createApp(env: ServerEnv): Hono {
   const app = new Hono()
@@ -39,9 +41,11 @@ export function createApp(env: ServerEnv): Hono {
   app.route('/', createCivitaiModelBundleAssistantRoutes(env))
   app.route('/', createCatalogCheckpointRoutes(env))
   app.route('/', createLocalModelsDumpRoutes(env))
-  app.route('/', createWorkflowTemplateRoutes())
+  app.route('/', createWorkflowTemplateRoutes(env))
+  app.route('/', createCreativeLoopRoutes(env))
   app.route('/', createWorkflowAssistantRoutes(env))
   app.route('/', createMattingAutoRoutes(env))
+  app.route('/', createCharacterLibraryRoutes(env))
 
   return app
 }

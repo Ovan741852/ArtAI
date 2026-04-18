@@ -1,0 +1,211 @@
+/* 角色總覽面板 BEM：croster__ */
+
+.croster {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(960px, 100%);
+  margin: 0 auto;
+  padding: 22px clamp(16px, 2.5vw, 28px) 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.croster__head {
+  margin: 0 0 16px;
+}
+
+.croster__title {
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+  color: var(--text-h);
+}
+
+.croster__lead {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.croster__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.croster__err {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #c0392b 12%, transparent);
+  color: var(--text-h);
+  font-size: 0.9rem;
+}
+
+.croster__btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-h) 8%, var(--bg));
+  color: var(--text-h);
+  font: inherit;
+  cursor: pointer;
+}
+
+.croster__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.croster__btn--accent {
+  background: var(--text-h);
+  color: var(--bg);
+  border-color: var(--text-h);
+}
+
+.croster__input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  min-width: 200px;
+}
+
+.croster__meta {
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+}
+
+.croster__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.croster__card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text) 3%, var(--bg));
+}
+
+.croster__card-head {
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.croster__card-head:hover {
+  background: color-mix(in srgb, var(--text-h) 6%, transparent);
+}
+
+.croster__card-head--open {
+  background: color-mix(in srgb, var(--text-h) 10%, transparent);
+}
+
+.croster__name {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+}
+
+.croster__card-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.croster__text-block {
+  margin: 14px 0 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.croster__text-block h4 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #888);
+  font-weight: 600;
+}
+
+.croster__text-block p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.croster__gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.croster__fig {
+  margin: 0;
+  max-width: 160px;
+}
+
+.croster__fig img {
+  display: block;
+  width: 140px;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.croster__fig figcaption {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+}
+
+.croster__details {
+  margin-top: 12px;
+  font-size: 0.85rem;
+}
+
+.croster__details summary {
+  cursor: pointer;
+  color: var(--text-muted, #888);
+  margin-bottom: 6px;
+}
+
+.croster__pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.croster__hint {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted, #888);
+}

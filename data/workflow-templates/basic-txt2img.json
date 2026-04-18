@@ -1,0 +1,138 @@
+{
+  "id": "basic-txt2img",
+  "titleZh": "基礎文生圖",
+  "descriptionZh": "標準 Checkpoint + KSampler 單張輸出；可透過白名單調整提示詞、尺寸、步數與取樣器。",
+  "tags": ["txt2img", "ksampler"],
+  "requiredPacks": [],
+  "whitelistParams": {
+    "ckpt_name": {
+      "nodeId": "4",
+      "inputKey": "ckpt_name",
+      "type": "string",
+      "descriptionEn": "ComfyUI models/checkpoints filename"
+    },
+    "positive_prompt": {
+      "nodeId": "6",
+      "inputKey": "text",
+      "type": "string",
+      "descriptionEn": "Positive CLIP prompt (English recommended for base models)"
+    },
+    "negative_prompt": {
+      "nodeId": "7",
+      "inputKey": "text",
+      "type": "string",
+      "descriptionEn": "Negative CLIP prompt"
+    },
+    "width": {
+      "nodeId": "5",
+      "inputKey": "width",
+      "type": "int",
+      "min": 256,
+      "max": 2048,
+      "descriptionEn": "Latent width"
+    },
+    "height": {
+      "nodeId": "5",
+      "inputKey": "height",
+      "type": "int",
+      "min": 256,
+      "max": 2048,
+      "descriptionEn": "Latent height"
+    },
+    "steps": {
+      "nodeId": "3",
+      "inputKey": "steps",
+      "type": "int",
+      "min": 1,
+      "max": 80,
+      "descriptionEn": "KSampler steps"
+    },
+    "cfg": {
+      "nodeId": "3",
+      "inputKey": "cfg",
+      "type": "float",
+      "min": 1,
+      "max": 30,
+      "descriptionEn": "CFG scale"
+    },
+    "seed": {
+      "nodeId": "3",
+      "inputKey": "seed",
+      "type": "int",
+      "min": 0,
+      "max": 2147483647,
+      "descriptionEn": "KSampler seed"
+    },
+    "sampler_name": {
+      "nodeId": "3",
+      "inputKey": "sampler_name",
+      "type": "string",
+      "descriptionEn": "KSampler sampler_name e.g. euler, dpmpp_2m"
+    },
+    "scheduler": {
+      "nodeId": "3",
+      "inputKey": "scheduler",
+      "type": "string",
+      "descriptionEn": "KSampler scheduler e.g. normal, karras"
+    }
+  },
+  "workflow": {
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": 0,
+        "steps": 20,
+        "cfg": 7,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1,
+        "model": ["4", 0],
+        "positive": ["6", 0],
+        "negative": ["7", 0],
+        "latent_image": ["5", 0]
+      }
+    },
+    "4": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "model.safetensors"
+      }
+    },
+    "5": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 512,
+        "height": 512,
+        "batch_size": 1
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "landscape, masterpiece, best quality",
+        "clip": ["4", 1]
+      }
+    },
+    "7": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "text, watermark, low quality",
+        "clip": ["4", 1]
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["3", 0],
+        "vae": ["4", 2]
+      }
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "filename_prefix": "artai_basic_txt2img",
+        "images": ["8", 0]
+      }
+    }
+  }
+}
